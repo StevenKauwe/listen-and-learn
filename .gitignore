@@ -1,3 +1,5 @@
 /target
-dist/
+/dist
+tests-browser/.profile/
+__pycache__/
 .DS_Store

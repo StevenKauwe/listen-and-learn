@@ -1,12 +1,14 @@
 [workspace]
 resolver = "2"
-members = ["crates/doremi-core"]
+members = ["crates/listen-core", "crates/listen-web"]
 
 [workspace.package]
 edition = "2021"
 version = "0.1.0"
-license-file = "LICENSE"
 
 [profile.release]
-opt-level = "s"
+opt-level = "z"
 lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

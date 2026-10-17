@@ -1,41 +1,37 @@
-# listen-and-learn
+# Listen & Learn
 
-A series of free, browser-based learning toys. Pure Rust, compiled to WASM.
-No accounts, no backend, no analytics, no ads.
+Ear-training games for small children, played on a phone: Do Re Mi, Bird
+or Fish (high and low), Same or Different, Up or Down, Echo, Turtle or
+Rabbit (slow and fast), Mouse or Elephant (quiet and loud), and a free-play
+xylophone. Pure Rust compiled to WebAssembly. No accounts, no backend, no
+analytics, no ads.
 
-## Project 1 — Do Re Mi
+Play: https://stevenkauwe.github.io/listen-and-learn/
 
-A toddler ear-training game (ages 2–4): the app plays a note; the child
-taps the big colored button for the note they heard. Full spec:
-`docs/do-re-mi-spec.md` (source of truth — behavior questions resolve there).
+- [docs/spec.md](docs/spec.md): shared rules for every game (touch, audio,
+  feedback, settings, platform, architecture, acceptance rows).
+- [docs/games.md](docs/games.md): each game's rules and levels.
 
-### Architecture
+## Layout
 
-- `crates/doremi-core` — **all game logic, pure Rust, no browser**: the
-  finite-state machine, the imprecise-touch gate, note tables, round
-  scheduler, settings. Every behavioral acceptance row is a unit test here.
-- `crates/doremi-app` — the Dioxus/WASM layer: renders state, forwards raw
-  pointer events to the core, synthesizes notes via Web Audio (`web-sys`),
-  makes **no decisions**.
-- `web/` — static shell: `index.html`, PWA manifest, icons, and a ~10-line
-  service worker (the one documented JS exception — SW is a browser API,
-  not app logic).
+- `crates/listen-core`: all game logic, headless and unit-tested.
+- `crates/listen-web`: the browser layer (`wasm-bindgen`, `web-sys`).
+- `web/`: the page body and CSS, PWA manifest, icons, service worker.
+- `tests-browser/`: the real-WebKit harness.
+- `tools/build.sh`: builds `dist/` (static site) and `dist/artifact/`.
 
-### Build (no trunk needed)
+## Build and test
 
-Same pipeline as crabscape: `tools/build-web.sh` →
-`cargo build --target wasm32-unknown-unknown` + `wasm-bindgen-cli` +
-static `index.html`. Serve `web/` with any static file server.
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.129
+cargo test --workspace
+tools/build.sh                       # wasm-opt on PATH is used if present
+python3 -m http.server -d dist 8000  # then open http://localhost:8000/
+python3 tests-browser/suite.py       # needs WebKitGTK 4.1 + PyGObject
+```
 
-### Testing
+On iPhone: open the site in Safari, Share, Add to Home Screen. The Home
+Screen app runs full screen and works offline after the first visit.
 
-- `cargo test --workspace` — the acceptance matrix, headless (32 tests).
-- `tests-browser/` — Playwright/WebKit harness for the rows that need a
-  real browser (no-scroll, real pointer events, offline).
-
-### Rules
-
-- All rights reserved. No licence file.
-- Facts about child development / audio claims in docs need real sources,
-  or are marked "not verified".
-- The core crate never depends on the app crate; UI stays dumb.
+All rights reserved.

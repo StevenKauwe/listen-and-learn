@@ -1,0 +1,8 @@
+[package]
+name = "listen-core"
+description = "Listen & Learn: headless game logic (touch gate, round machine, games, settings)"
+edition.workspace = true
+version.workspace = true
+publish = false
+
+[dependencies]
