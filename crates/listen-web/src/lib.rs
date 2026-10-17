@@ -192,6 +192,11 @@ pub fn start() -> Result<(), JsValue> {
     listen(w, "pointercancel", true, |e: PointerEvent| {
         with(|a| a.on_up(&e, true));
     });
+    // iOS only lets audio start from an activating event; a touch's
+    // pointerdown isn't one, its touchend is.
+    listen(w, "touchend", true, |_: web_sys::Event| {
+        with(|a| a.unlock_audio());
+    });
     listen(w, "keydown", false, |e: KeyboardEvent| {
         with(|a| a.on_key(&e));
     });

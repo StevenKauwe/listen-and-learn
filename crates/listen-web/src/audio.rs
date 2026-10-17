@@ -13,6 +13,80 @@ pub struct Audio {
     master: GainNode,
     voices: Vec<(GainNode, f64)>,
     primed: bool,
+    unmuted: bool,
+}
+
+/// iPhones mute Web Audio when the ring/silent switch is on, unlike media
+/// playback, so a toddler's toy would be silent for most parents. Safari 17+
+/// lets a page declare itself "playback" audio (`navigator.audioSession`).
+/// Older iOS: a looping silent `<audio>` element started in a gesture moves
+/// the page into the media category, which also carries Web Audio through.
+/// Returns true once one of the two has been applied.
+fn play_through_silent_switch() -> bool {
+    use js_sys::Reflect;
+    let Some(win) = web_sys::window() else {
+        return false;
+    };
+    let nav: JsValue = win.navigator().into();
+    if let Ok(session) = Reflect::get(&nav, &"audioSession".into()) {
+        if session.is_object() {
+            return Reflect::set(&session, &"type".into(), &"playback".into()).unwrap_or(false);
+        }
+    }
+    let Ok(el) = web_sys::HtmlAudioElement::new_with_src(&silent_wav_uri()) else {
+        return false;
+    };
+    el.set_loop(true);
+    let _ = el.set_attribute("playsinline", "");
+    match el.play() {
+        Ok(p) => {
+            let noop = wasm_bindgen::closure::Closure::once(|_: JsValue| {});
+            let _ = p.catch(&noop);
+            noop.forget();
+            // Keep it alive (and playing) for the page's lifetime.
+            std::mem::forget(el);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// A 0.1 s silent mono 8-bit 8 kHz WAV as a data URI (built here, no asset).
+fn silent_wav_uri() -> String {
+    const N: u32 = 800;
+    let mut b: Vec<u8> = Vec::with_capacity(44 + N as usize);
+    b.extend_from_slice(b"RIFF");
+    b.extend_from_slice(&(36 + N).to_le_bytes());
+    b.extend_from_slice(b"WAVEfmt ");
+    b.extend_from_slice(&16u32.to_le_bytes());
+    b.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    b.extend_from_slice(&1u16.to_le_bytes()); // mono
+    b.extend_from_slice(&8000u32.to_le_bytes());
+    b.extend_from_slice(&8000u32.to_le_bytes()); // bytes per second
+    b.extend_from_slice(&1u16.to_le_bytes()); // block align
+    b.extend_from_slice(&8u16.to_le_bytes()); // bits
+    b.extend_from_slice(b"data");
+    b.extend_from_slice(&N.to_le_bytes());
+    b.resize(44 + N as usize, 128); // 8-bit silence is the midpoint
+    format!("data:audio/wav;base64,{}", base64(&b))
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut s = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for c in bytes.chunks(3) {
+        let n = (c[0] as u32) << 16
+            | (*c.get(1).unwrap_or(&0) as u32) << 8
+            | *c.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            if i <= c.len() {
+                s.push(T[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                s.push('=');
+            }
+        }
+    }
+    s
 }
 
 /// Lead time so the first partial never starts in the past.
@@ -46,6 +120,7 @@ impl Audio {
             master,
             voices: vec![],
             primed: false,
+            unmuted: false,
         })
     }
 
@@ -62,7 +137,8 @@ impl Audio {
         }
     }
 
-    /// Call inside every user gesture (iOS only unlocks from one).
+    /// Call inside every user gesture (iOS only unlocks from one, and only
+    /// from `touchend`/`pointerup`/`click`, not from a touch `pointerdown`).
     pub fn unlock(&mut self) {
         if !self.running() {
             if let Ok(p) = self.ctx.resume() {
@@ -71,6 +147,12 @@ impl Audio {
                 let _ = p.catch(&noop);
                 noop.forget();
             }
+            // Re-prime until the context actually runs: a prime from a
+            // non-activating event does nothing on iOS.
+            self.primed = false;
+        }
+        if !self.unmuted {
+            self.unmuted = play_through_silent_switch();
         }
         if !self.primed {
             if let (Ok(buf), Ok(src)) = (
@@ -178,5 +260,29 @@ impl Audio {
                 let _ = g.set_target_at_time(0.0, now, 0.03);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base64_matches_known_vectors() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn silent_wav_is_a_valid_header() {
+        let uri = silent_wav_uri();
+        assert!(uri.starts_with("data:audio/wav;base64,UklGR")); // "RIFF"
+        assert_eq!(
+            uri.len() - "data:audio/wav;base64,".len(),
+            (44 + 800usize).div_ceil(3) * 4
+        );
     }
 }
