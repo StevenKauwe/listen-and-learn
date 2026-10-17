@@ -28,9 +28,11 @@ fn play_through_silent_switch() -> bool {
         return false;
     };
     let nav: JsValue = win.navigator().into();
+    // Both, not either: some web views (e.g. inside apps or frames) expose
+    // audioSession but don't honour it, while the media element still works.
     if let Ok(session) = Reflect::get(&nav, &"audioSession".into()) {
         if session.is_object() {
-            return Reflect::set(&session, &"type".into(), &"playback".into()).unwrap_or(false);
+            let _ = Reflect::set(&session, &"type".into(), &"playback".into());
         }
     }
     let Ok(el) = web_sys::HtmlAudioElement::new_with_src(&silent_wav_uri()) else {
