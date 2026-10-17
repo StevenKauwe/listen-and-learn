@@ -1,0 +1,10 @@
+[package]
+name = "doremi-core"
+description = "Do Re Mi: toddler ear-training - pure game logic (state machine, touch gate, notes, scheduler)"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
