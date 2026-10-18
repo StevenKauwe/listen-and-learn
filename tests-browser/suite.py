@@ -214,6 +214,20 @@ def fits(label):
     check(bad == "" and js("scrollY === 0"), f"{label}: fits, no scroll (outside: {bad or 'none'})")
 
 
+CENTRE = """(() => [...document.querySelectorAll('.knob, .listen')].filter(b => b.getClientRects().length).map((b) => {
+  const r = b.getBoundingClientRect(); let l = 1e9, t = 1e9, R = -1e9, B = -1e9;
+  b.querySelectorAll('svg:not(.ring) path, svg:not(.ring) circle, svg:not(.ring) rect').forEach((s) => {
+    const q = s.getBoundingClientRect(); if (!q.width) return;
+    l = Math.min(l, q.left); t = Math.min(t, q.top); R = Math.max(R, q.right); B = Math.max(B, q.bottom); });
+  return [b.dataset.hold || b.id || b.getAttribute('aria-label'), (l + R) / 2 - (r.left + r.width / 2), (t + B) / 2 - (r.top + r.height / 2)];
+}))()"""
+
+
+def centred(where):
+    for name, dx, dy in js(CENTRE):
+        check(abs(dx) <= 1 and abs(dy) <= 1, f"{where}: the {name} icon is centred in its button (dx {dx:+.2f}, dy {dy:+.2f} px)")
+
+
 def go(slug):
     js(f"(location.hash = '{slug}', true)")
     return wait_for(f"document.body.dataset.route === '{slug or 'home'}'")
@@ -234,6 +248,8 @@ def play_game(slug):
     if slug == "drum":
         drum_rows()
         return
+    if slug == "notes":
+        centred("game")
     check(attr("phase") == "ready", f"{slug}: starts ready")
     first = '#stage [data-t="0"]'
     tap(first)
@@ -490,11 +506,17 @@ def main():
     pump(1.0)
     fits("home portrait")
     shot("home-portrait")
+    centred("home")
     check(attr("errors") == "0", "no page errors on load")
     # A tile tap plays its hint and opens the game.
+    # Count every fade/cut of a scheduled gain while a tile opens its game.
+    js("""(() => { window.__cuts = 0; const P = AudioParam.prototype;
+      for (const m of ['cancelScheduledValues', 'cancelAndHoldAtTime']) { const f = P[m]; if (f) P[m] = function (...a) { window.__cuts++; return f.apply(this, a); }; }
+      return true; })()""")
     tap('[data-t="110"]')
     check(wait_for("document.body.dataset.route === 'notes'", 3), "home tile opens its game")
-    pump(0.4)
+    pump(1.0)
+    check(js("window.__cuts") == 0, f"the tile's hint rings out: opening a game cuts no sound ({js('window.__cuts')} cuts)")
     shot("game-notes-ready")
     for g in GAMES:
         play_game(g)
@@ -528,6 +550,11 @@ def main():
     check(js("!!document.querySelector('.gm.open .badge:not(.soft)')"), "settings: changing a control marks the game as changed")
     js("(document.querySelector('[data-act=more]').click(), true)")
     check(js("!!document.querySelector('.more .hint-line')"), "settings: the simple panel notes the hand-changed game")
+    js("(document.querySelector('[data-act=more]').click(), true)")
+    js("(document.querySelector('[data-act=\"open:9\"]') || {click(){}}).click(), true")
+    js("(document.querySelector('[data-act=\"chord:1\"]').click(), true)")
+    check("notes_at_once=2" in (js(f"localStorage.getItem('{STORE}')") or ""), "settings: notes at once is stored")
+    js("(document.querySelector('[data-act=\"chord:3\"]').click(), document.querySelector('[data-act=more]').click(), true)")
     js("(document.querySelector('[data-act=close]').click(), true)")
     check(js("document.getElementById('sheet').hidden"), "settings close")
     check("t.birdfish=" in (js(f"localStorage.getItem('{STORE}')") or ""), "settings are stored")

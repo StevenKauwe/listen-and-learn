@@ -101,6 +101,9 @@ fn base64(bytes: &[u8]) -> String {
 /// Lead time for questions, so a tune's first tone never starts in the
 /// past while its later tones are scheduled. Touches use no lead.
 const LEAD: f64 = 0.03;
+/// The fade when sound is stopped (leaving a game, the settings sheet, a
+/// hidden page): a time constant, so about 0.4 s to silence, never a cut.
+pub const FADE_LEAVE: f64 = 0.12;
 /// A touched bar's attack: the same tone, struck at once.
 const TOUCH_ATTACK: f64 = 0.008;
 
@@ -395,14 +398,27 @@ impl Audio {
         Ok(())
     }
 
-    /// Fade every sounding voice out quickly (no clicks).
-    pub fn stop_all(&mut self) {
+    /// Fade every sounding voice out (no clicks): holds each voice at its
+    /// current level (`cancelAndHoldAtTime`; cancelling alone would jump
+    /// back to the level before a running ramp), then decays with time
+    /// constant `tau` seconds.
+    pub fn stop_all(&mut self, tau: f64) {
         let now = self.now();
         for (v, end) in self.voices.drain(..) {
             if end > now {
                 let g = v.gain();
-                let _ = g.cancel_scheduled_values(now);
-                let _ = g.set_target_at_time(0.0, now, 0.03);
+                let p: &JsValue = g.as_ref();
+                let held = js_sys::Reflect::get(p, &"cancelAndHoldAtTime".into())
+                    .ok()
+                    .and_then(|f| f.dyn_into::<js_sys::Function>().ok())
+                    .map(|f| f.call1(p, &JsValue::from_f64(now)).is_ok())
+                    .unwrap_or(false);
+                if !held {
+                    let level = g.value();
+                    let _ = g.cancel_scheduled_values(now);
+                    let _ = g.set_value_at_time(level, now);
+                }
+                let _ = g.set_target_at_time(0.0, now, tau);
             }
         }
     }

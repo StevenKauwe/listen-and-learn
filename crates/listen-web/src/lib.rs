@@ -760,8 +760,12 @@ impl App {
     fn leave(&mut self) {
         self.epoch += 1;
         self.reset_input();
-        if let Some(a) = self.audio.as_mut() {
-            a.stop_all();
+        // Only leaving a game fades its sound. Opening a game from home
+        // keeps the tile's hint ringing (it used to be cut mid-note).
+        if matches!(self.screen, Screen::Game(_)) {
+            if let Some(a) = self.audio.as_mut() {
+                a.stop_all(audio::FADE_LEAVE);
+            }
         }
         self.round = None;
         self.drum = None;
@@ -831,6 +835,9 @@ impl App {
         self.warm_later(self.epoch);
         self.root.set_inner_html(&view::game(g, &targets));
         self.measure_bars();
+        if g.beat() {
+            self.set_msg("<span>Listen!</span>", "");
+        }
         self.body.set_attribute("data-route", g.slug()).ok();
         self.wake();
         self.sync();
@@ -886,7 +893,7 @@ impl App {
                 },
                 Effect::StopAudio => {
                     if let Some(a) = self.audio.as_mut() {
-                        a.stop_all();
+                        a.stop_all(audio::FADE_LEAVE);
                     }
                     if let Ok(list) = self.root.query_selector_all(".lit") {
                         for i in 0..list.length() {
@@ -1377,7 +1384,7 @@ impl App {
         if self.drum.take().is_some() {
             self.epoch += 1;
             if let Some(a) = self.audio.as_mut() {
-                a.stop_all();
+                a.stop_all(audio::FADE_LEAVE);
             }
             self.clear_class("lit");
             self.show_streak(0);
@@ -1393,7 +1400,7 @@ impl App {
             if self.round.is_some() {
                 self.feed(Event::Interrupted);
             } else if let Some(a) = self.audio.as_mut() {
-                a.stop_all();
+                a.stop_all(audio::FADE_LEAVE);
             }
         } else if matches!(self.screen, Screen::Game(_)) {
             self.wake();

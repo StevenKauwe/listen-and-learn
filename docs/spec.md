@@ -67,6 +67,7 @@ games never sound or activate a neighbour on slide-over.
 | Touch to press visual | the next frame; presses have no transition on the way down |
 | Questions | 30 ms scheduling lead, so a tune's tones keep their spacing |
 | Audio context | `latencyHint: "interactive"` |
+| Stopping sound | only when leaving a game, opening the sheet or hiding the page, always a fade (held at its level, then a 0.12 s time constant), never a cut; opening a game from home lets the tile's hint ring out |
 | Sung syllables | rendered ahead of time, one per idle task, never in a touch |
 | Moving art | parts that move all the time (bear paws, bird wing) sit outside the big wobble filter; pressed elements are composited (`will-change: transform`) |
 
@@ -146,7 +147,9 @@ resume is the retry path, not an error.
 ### 2.4 Look and feedback
 
 A painted wooden toy on a nursery wall, in light and dark themes. Inline
-SVG characters with an ink outline and a faint hand-drawn wobble. Text is
+SVG characters with an ink outline and a faint hand-drawn wobble. Round
+buttons carry one plain glyph each, centred within 1 px: a house, a
+toothed gear with a hole, a speaker cone with waves, full-screen corners. Text is
 secondary: at most two words on a play screen.
 
 Solfège colours never change, in any game:

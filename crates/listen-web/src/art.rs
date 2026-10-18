@@ -267,7 +267,9 @@ pub const SPEAKER: &str = r##"<svg class="spk" viewBox="0 0 100 100" aria-hidden
 
 pub const HOUSE: &str = r##"<svg class="ico" viewBox="0 0 60 60" aria-hidden="true"><path class="k" fill="#FFF8EC" d="M12 30 L30 14 L48 30 V48 H12Z"/><path class="k" fill="#E5493A" d="M25 48 V37 h10 v11"/></svg>"##;
 
-pub const GEAR: &str = r##"<svg class="ico" viewBox="0 0 60 60" aria-hidden="true"><circle cx="30" cy="30" r="17" fill="none" stroke="#FFF8EC" stroke-width="8" stroke-dasharray="5.34 5.34"/><circle class="k" fill="#FFF8EC" cx="30" cy="30" r="13"/><circle class="k" fill="#C99460" cx="30" cy="30" r="5"/></svg>"##;
+/// A gear: eight square teeth and a centre hole (the wood shows through),
+/// never a sun or a sound.
+pub const GEAR: &str = r##"<svg class="ico" viewBox="0 0 60 60" aria-hidden="true"><path class="k" fill="#FFF8EC" fill-rule="evenodd" stroke-width="2.5" d="M44.8 25.4 L50.6 25.8 L50.6 34.2 L44.8 34.6 L43.7 37.2 L47.5 41.6 L41.6 47.5 L37.2 43.7 L34.6 44.8 L34.2 50.6 L25.8 50.6 L25.4 44.8 L22.8 43.7 L18.4 47.5 L12.5 41.6 L16.3 37.2 L15.2 34.6 L9.4 34.2 L9.4 25.8 L15.2 25.4 L16.3 22.8 L12.5 18.4 L18.4 12.5 L22.8 16.3 L25.4 15.2 L25.8 9.4 L34.2 9.4 L34.6 15.2 L37.2 16.3 L41.6 12.5 L47.5 18.4 L43.7 22.8Z M37 30 A7 7 0 1 0 23 30 A7 7 0 1 0 37 30Z"/></svg>"##;
 
 pub const FULLSCREEN: &str = r##"<svg class="ico" viewBox="0 0 60 60" aria-hidden="true"><path class="k" fill="none" stroke-width="5" d="M14 24 V14 H24 M36 14 H46 V24 M46 36 V46 H36 M24 46 H14 V36"/></svg>"##;
 
@@ -313,8 +315,8 @@ pub fn duo(slug: &str) -> (String, String) {
 
 /// The bear's paws drum on every beat, so they move outside the face's
 /// filter (see [`svg_moving`]).
-const PAWS: &str = r##"<g class="paw"><g filter="url(#wob)"><path class="k" fill="#C48B57" d="M28 78 q-14 10 -6 26 l10 -2 q-2 -10 6 -16z"/><path class="k" fill="none" stroke-width="4" d="M24 100 L6 116"/></g></g>
-<g class="paw p2"><g filter="url(#wob)"><path class="k" fill="#C48B57" d="M92 78 q14 10 6 26 l-10 -2 q2 -10 -6 -16z"/><path class="k" fill="none" stroke-width="4" d="M96 100 L114 116"/></g></g>"##;
+const PAWS: &str = r##"<g class="paw"><g filter="url(#wob)"><path class="k" fill="#C48B57" d="M28 78 q-14 10 -6 26 l10 -2 q-2 -10 6 -16z"/><path class="k stick" fill="none" stroke-width="4" d="M24 100 L6 116"/></g></g>
+<g class="paw p2"><g filter="url(#wob)"><path class="k" fill="#C48B57" d="M92 78 q14 10 6 26 l-10 -2 q2 -10 -6 -16z"/><path class="k stick" fill="none" stroke-width="4" d="M96 100 L114 116"/></g></g>"##;
 
 pub fn bear_svg() -> String {
     svg_moving(&bear(), PAWS)
@@ -362,7 +364,7 @@ pub fn tile(slug: &str) -> String {
             bell()
         )),
         "drum" => svg(&format!(
-            r#"<g transform="translate(22 0) scale(.62)">{}{}</g><g transform="translate(14 58) scale(.78)">{}</g>"#,
+            r#"<g transform="translate(28 -2) scale(.53)">{}{}</g><g transform="translate(18 38) scale(.7)">{}</g>"#,
             bear(),
             PAWS.replace(r#"<g filter="url(#wob)">"#, "<g>"),
             drum()
@@ -393,7 +395,7 @@ pub fn tile(slug: &str) -> String {
                 ));
             }
             b.push_str(
-                r##"<path class="k" fill="none" stroke-width="5" d="M66 112 L98 70"/><path fill="none" stroke="#C99460" stroke-width="2.5" stroke-linecap="round" d="M66 112 L98 70"/><circle class="k" fill="#F6B6C4" cx="100" cy="66" r="9"/>"##,
+                r##"<path class="k" fill="none" stroke-width="5" d="M68 104 L98 70"/><path fill="none" stroke="#C99460" stroke-width="2.5" stroke-linecap="round" d="M68 104 L98 70"/><circle class="k" fill="#F6B6C4" cx="100" cy="66" r="9"/>"##,
             );
             svg(&b)
         }
