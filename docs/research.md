@@ -93,14 +93,34 @@ read. Anything marked **not verified** is a design inference.
 |---|---|---|---|---|
 | Who's singing? (new) | timbre | timbre–picture links are easy for preschoolers, contour ones are not [2] | 2+ | 2: singer or xylophone · 3: + bell · 4–5+: + flute |
 | Bird or Fish | high/low | pitch–height/size correspondence from infancy [6, 7]; direction is hard, so huge gaps [1] | 2+ | 2: 31 st apart · 3: 31 → 21 st · 4: 31 → 20 st (middle-C reference) · 5+: 21 → 10 st |
-| Drum along (new) | steady beat | partner model [15], tempo near the child's own [14], many can't sync yet [16] | 2+ | 2–3: every drum counts, 500 ms · 4: on the beat ±25 %, 600 ms · 5+: ±18 %, 500 ms |
+| Drum along (new) | steady beat | partner model [15], tempo near the child's own [14], many can't sync yet [16] | 2+ | 2–3: free drumming with the bear, 500 ms, nothing counted · 4: streak on, ±25 % of 600 ms · 5+: streak on, ±18 % of 500 ms |
 | Turtle or Rabbit | tempo | rabbit/tortoise tempo task, thresholds by age [13] | 2+ (best 3+) | 2: 3:1 · 3: 3:1 → 2:1 · 4: → ±15 % · 5+: 2:1 → ±10 % |
 | Mouse or Elephant | loudness | adult-like by 5 [4]; loud-as-more disorganised at 2 [5] | 3+ (playable at 2) | 2: 24 dB · 3: 24 → 18 · 4: → 8 · 5+: 18 → 6 dB |
 | Do Re Mi | pitch names | Kodály order [21]; names sung on their pitch; ear-only identification of a 3-semitone step is beyond 2-year-olds [1], so age 2 keeps the light | 2+ with lights, by ear 4+ | 2: sol mi · 3: sol mi la · 4: do mi sol la · 5+: do re mi sol la |
 | Echo | melodic memory | short patterns; Gordon's pattern focus [22]; sol–mi first [21] | 2+ with lights | 2: sol mi, 2 notes · 3: + la, 2–3 notes · 4: do mi sol la, 3 · 5+: up to 4 notes |
 | Up or Down | contour | direction at 4 st is hard even at 5 [1]; contour labels are hard [2] | 3+ (playable at 2) | 2: octave arpeggio · 3: + do mi sol · 4: + five steps · 5+: down to three 2-st steps |
 | Same or Different | change detection | detecting a change is easier than naming its direction [1] | 3+ (the idea of "same" at 2: **not verified**) | 2: octave · 3: → fifth · 4: → fourth · 5+: fifth → whole step |
-| Free play | exploration | contingency: every touch sounds; pentatonic so any order is pleasant | 2+ | 2–3: six bars · 4+: eight |
+| Free play | exploration | contingency: every touch sounds; pentatonic so any order is pleasant | 2+ | 2–3: six bars · 4+: eight; five notes at once at every age |
+
+Drum along's streak is off below 4: about a quarter of 3–5-year-olds
+keep neither a 400 nor a 600 ms beat [16], so a count would mostly show
+younger children failing. From 4 it counts drums in a row within the
+rung's window (±150 ms at 600 ms, ±90 ms at 500 ms); a miss only starts
+it again. The windows are the earlier judged-rung values; they are now
+measured against the beat as heard (output latency removed), which makes
+them effectively fairer, not stricter.
+
+Free play allows five notes at once at every age. Two-year-olds use
+several fingers far more than 3-year-olds [11]; with one finger at a
+time, a resting finger or palm silences every other touch, which reads as
+"broken" rather than as a rule. A real xylophone sounds under every hand.
+Whether multi-touch confuses toddlers was **not verified**.
+
+Replaying the question with the chosen picture moving after a right
+answer pairs the sound with its picture once more (the cross-modal
+links in [6, 7]) and makes the touch's consequence specific to it [8,
+9]. A study testing replay-on-success itself was not found: **not
+verified**.
 
 No game was removed: each has at least some support at some age, and
 the bands put the weaker ones (same/different, up/down, loudness) at

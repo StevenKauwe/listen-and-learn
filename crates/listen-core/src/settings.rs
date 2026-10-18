@@ -26,7 +26,14 @@ pub struct Settings {
     pub cheer: bool,
     /// Right answers in a set before a rest (0 = no rest).
     pub set_len: u8,
+    /// Free play: how many bars may sound at once (one per finger).
+    pub notes_at_once: u8,
+    /// Drum along: count on-beat drums in a row.
+    pub streak: bool,
 }
+
+/// The "notes at once" choices in the More panel.
+pub const NOTES_AT_ONCE: [u8; 5] = [1, 2, 3, 5, 10];
 
 /// Note-length range for the adult slider.
 pub const NOTE_LEN: (f32, f32) = (0.8, 2.0);
@@ -42,6 +49,8 @@ impl Default for Settings {
             auto_next: true,
             cheer: true,
             set_len: 0,
+            notes_at_once: crate::calib::NOTES_AT_ONCE,
+            streak: false,
         };
         s.set_age(Age::Two);
         s
@@ -57,12 +66,34 @@ impl Settings {
             .map(|g| preset(age, g.slug()).clamped(g.steps().len()))
             .collect();
         self.set_len = age.set_len();
+        self.streak = age.streak();
+    }
+
+    /// Drum along's streak as the age sets it.
+    pub fn streak_preset(&self) -> bool {
+        self.age.streak()
     }
 
     /// True when the tune of game `i` is not its age preset.
     pub fn custom(&self, i: usize) -> bool {
         let g = ALL[i];
-        self.tunes[i] != preset(self.age, g.slug()).clamped(g.steps().len())
+        let extra = match g.slug() {
+            "drum" => self.streak != self.age.streak(),
+            "play" => self.notes_at_once != crate::calib::NOTES_AT_ONCE,
+            _ => false,
+        };
+        extra || self.tunes[i] != preset(self.age, g.slug()).clamped(g.steps().len())
+    }
+
+    /// "Back to the age setting" for game `i`.
+    pub fn to_preset(&mut self, i: usize) {
+        let g = ALL[i];
+        self.tunes[i] = preset(self.age, g.slug()).clamped(g.steps().len());
+        match g.slug() {
+            "drum" => self.streak = self.age.streak(),
+            "play" => self.notes_at_once = crate::calib::NOTES_AT_ONCE,
+            _ => {}
+        }
     }
 
     pub fn sanitized(mut self) -> Self {
@@ -88,6 +119,9 @@ impl Settings {
             defaults.note_len
         };
         self.set_len = self.set_len.min(30);
+        if !NOTES_AT_ONCE.contains(&self.notes_at_once) {
+            self.notes_at_once = defaults.notes_at_once;
+        }
         self
     }
 
@@ -109,7 +143,7 @@ impl Settings {
     /// `key=value` lines; tunes as `t.<slug>=lo,hi,show,light,glow_miss,glow_wait,replay`.
     pub fn encode(&self) -> String {
         let mut s = format!(
-            "v=2\nage={}\nvolume={}\nnote_len={}\nsing={}\nauto_next={}\ncheer={}\nset_len={}\n",
+            "v=2\nage={}\nvolume={}\nnote_len={}\nsing={}\nauto_next={}\ncheer={}\nset_len={}\nnotes_at_once={}\nstreak={}\n",
             self.age.years(),
             self.volume,
             self.note_len,
@@ -117,6 +151,8 @@ impl Settings {
             self.auto_next as u8,
             self.cheer as u8,
             self.set_len,
+            self.notes_at_once,
+            self.streak as u8,
         );
         for (g, t) in ALL.iter().zip(&self.tunes) {
             s.push_str(&format!(
@@ -156,6 +192,8 @@ impl Settings {
                 "auto_next" => s.auto_next = flag,
                 "cheer" => s.cheer = flag,
                 "set_len" => s.set_len = v.parse().unwrap_or(s.set_len),
+                "notes_at_once" => s.notes_at_once = v.parse().unwrap_or(s.notes_at_once),
+                "streak" => s.streak = flag,
                 _ => {
                     let Some(slug) = k.strip_prefix("t.") else {
                         continue;
@@ -196,6 +234,8 @@ mod tests {
         s.set_age(Age::Four);
         s.tunes[0].show = 5;
         s.tunes[2].hi = 3;
+        s.notes_at_once = 2;
+        s.streak = false;
         assert_eq!(Settings::decode(&s.encode()), s);
     }
 
@@ -236,5 +276,41 @@ mod tests {
         s.set_age(Age::Three);
         assert!((0..ALL.len()).all(|i| !s.custom(i)));
         assert_eq!(s.set_len, Age::Three.set_len());
+    }
+
+    #[test]
+    fn notes_at_once_defaults_to_one_hand_and_clamps_to_its_choices() {
+        let s = Settings::default();
+        assert_eq!(s.notes_at_once, 5);
+        assert!(NOTES_AT_ONCE.contains(&s.notes_at_once));
+        assert_eq!(Settings::decode("notes_at_once=7\n").notes_at_once, 5);
+        assert_eq!(Settings::decode("notes_at_once=1\n").notes_at_once, 1);
+        let mut s = Settings::default();
+        let play = ALL.iter().position(|g| g.slug() == "play").unwrap();
+        s.notes_at_once = 1;
+        assert!(s.custom(play));
+        s.to_preset(play);
+        assert!(!s.custom(play));
+    }
+
+    #[test]
+    fn the_streak_is_off_at_two_and_three_and_on_from_four() {
+        let drum = ALL.iter().position(|g| g.slug() == "drum").unwrap();
+        for (age, on) in [
+            (Age::Two, false),
+            (Age::Three, false),
+            (Age::Four, true),
+            (Age::Five, true),
+        ] {
+            let mut s = Settings::default();
+            s.set_age(age);
+            assert_eq!(s.streak, on, "{age:?}");
+            s.streak = !on;
+            assert!(s.custom(drum));
+            let back = Settings::decode(&s.encode());
+            assert_eq!(back.streak, !on, "a grown-up's choice is kept");
+            s.to_preset(drum);
+            assert_eq!(s.streak, on);
+        }
     }
 }

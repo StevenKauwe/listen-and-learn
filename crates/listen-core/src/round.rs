@@ -65,6 +65,9 @@ pub enum Effect {
     Right {
         target: u8,
         name: Option<&'static str>,
+        /// The question's replay inside the answer sound: (start, length)
+        /// in seconds, so the picture can move in time with it.
+        confirm: Option<(f32, f32)>,
     },
     Wrong {
         target: u8,
@@ -106,6 +109,11 @@ pub struct RoundCfg {
 pub const NEXT_AFTER_S: f32 = 1.5;
 /// Pause after an Echo slip before the pattern plays again.
 pub const ECHO_REPLAY_S: f32 = 0.9;
+/// A right answer's replay of the question keeps only the tones that
+/// start within this many seconds, so the celebration stays short.
+pub const CONFIRM_CAP: f32 = 1.6;
+/// The replay starts at most this long after the answer's own sound.
+pub const CONFIRM_AT_MAX: f32 = 0.8;
 
 pub struct Round {
     pub game: &'static dyn Game,
@@ -197,6 +205,14 @@ impl Round {
 
     pub fn accepts_answer(&self) -> bool {
         self.phase == Phase::Awaiting
+    }
+
+    /// What touching answer `t` sounds like right now, so the web layer
+    /// can sound it at contact (the answer itself is still judged when the
+    /// gate decides). None while answers are closed.
+    pub fn touch_sound(&self, t: u8) -> Option<Sound> {
+        self.accepts_answer()
+            .then(|| self.game.answer_sound(self.knobs(), t))
     }
 
     pub fn accepts_listen(&self) -> bool {
@@ -342,9 +358,20 @@ impl Round {
             if let (true, Some((deg, midi))) = (self.cfg.sing, self.q.sing) {
                 sound = sound.with_name(deg, midi, crate::games::notes::SING_AT);
             }
+            let mut confirm = None;
+            let mut chime_at = (dur.max(0.6) + 0.5).min(sound.dur);
+            if let Some(speed) = self.game.confirm_speed() {
+                // The question once more, the picture moving with it.
+                let c = self.q.sound.confirm(speed, CONFIRM_CAP, t);
+                let at = (dur * 0.75).min(CONFIRM_AT_MAX);
+                let last = c.tones.iter().map(|x| x.at).fold(0.0, f32::max);
+                sound = sound.then(&c, at);
+                chime_at = at + last + 0.35;
+                confirm = Some((at, c.dur));
+            }
             let total = sound.dur;
             if self.cfg.cheer {
-                sound = sound.with_chime(total.min(dur.max(0.6) + 0.5).min(total));
+                sound = sound.with_chime(chime_at.min(total));
             }
             let mut fx = vec![
                 Effect::Hint(None),
@@ -353,6 +380,7 @@ impl Round {
                 Effect::Right {
                     target: t,
                     name: self.q.name,
+                    confirm,
                 },
                 self.progress(),
             ];
@@ -642,5 +670,90 @@ mod tests {
             .find(|t| t.voice == crate::music::Voice::Sing(deg % 7))
             .expect("a sung name");
         assert_eq!(sung.midi, midi as f32);
+    }
+
+    fn right_sound(r: &mut Round) -> (Sound, Option<(f32, f32)>, Vec<Effect>) {
+        hear(r);
+        let fx = r.handle(Event::Answer(r.q.answer[0]));
+        let s = fx
+            .iter()
+            .find_map(|e| match e {
+                Effect::Play(s) => Some(s.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let c = fx
+            .iter()
+            .find_map(|e| match e {
+                Effect::Right { confirm, .. } => Some(*confirm),
+                _ => None,
+            })
+            .unwrap();
+        (s, c, fx)
+    }
+
+    #[test]
+    fn comparison_games_replay_the_question_lit_on_the_answer_when_right() {
+        for slug in ["stairs", "birdfish", "twins", "tempo", "loud", "who"] {
+            let mut r = Round::new(by_slug(slug).unwrap().1, cfg(slug, Age::Four), 11);
+            let q = r.q.sound.clone();
+            let (s, confirm, fx) = right_sound(&mut r);
+            let (at, len) = confirm.unwrap_or_else(|| panic!("{slug}: no replay"));
+            let replay: Vec<_> = s
+                .tones
+                .iter()
+                .filter(|t| t.at >= at - 1e-4 && t.voice == q.tones[0].voice)
+                .collect();
+            assert!(!replay.is_empty(), "{slug}");
+            let speed = if slug == "tempo" {
+                1.0
+            } else {
+                crate::games::CONFIRM_SPEED
+            };
+            for (a, b) in replay.iter().zip(&q.tones) {
+                assert_eq!((a.midi, a.gain, a.dur), (b.midi, b.gain, b.dur), "{slug}");
+                assert!((a.at - at - b.at / speed).abs() < 1e-4, "{slug} timing");
+                assert_eq!(a.light, Some(r.q.answer[0]), "{slug} lights the answer");
+            }
+            // Short: the next round is never held up much.
+            assert!(at + len <= 4.0, "{slug}: {at} + {len}");
+            let wait = fx
+                .iter()
+                .find_map(|e| match e {
+                    Effect::Wait { secs, .. } => Some(*secs),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(wait <= 4.0, "{slug} waits {wait}");
+        }
+    }
+
+    #[test]
+    fn turtle_or_rabbit_replays_at_the_asked_tempo_and_do_re_mi_does_not_replay() {
+        let mut r = Round::new(by_slug("tempo").unwrap().1, cfg("tempo", Age::Two), 3);
+        let q = r.q.sound.clone();
+        let (s, confirm, _) = right_sound(&mut r);
+        let (at, _) = confirm.unwrap();
+        let replay: Vec<_> = s.tones.iter().filter(|t| t.light.is_some()).collect();
+        assert!(replay.len() >= 2);
+        let gap = replay[1].at - replay[0].at;
+        assert!((gap - (q.tones[1].at - q.tones[0].at)).abs() < 1e-4);
+        assert!(replay[0].at >= at - 1e-4);
+        let mut r = Round::new(by_slug("notes").unwrap().1, cfg("notes", Age::Four), 3);
+        assert_eq!(right_sound(&mut r).1, None);
+    }
+
+    #[test]
+    fn touch_sound_is_offered_only_while_answers_are_open() {
+        let mut r = Round::new(by_slug("notes").unwrap().1, cfg("notes", Age::Four), 3);
+        assert!(r.touch_sound(r.q.answer[0]).is_none());
+        let fx = r.handle(Event::Listen);
+        assert!(
+            r.touch_sound(r.q.answer[0]).is_none(),
+            "during the question"
+        );
+        r.handle(Event::Timer(seq(&fx)));
+        let t = r.q.answer[0];
+        assert_eq!(r.touch_sound(t), Some(r.game.answer_sound(r.knobs(), t)));
     }
 }

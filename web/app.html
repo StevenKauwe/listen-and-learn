@@ -150,6 +150,11 @@ body[data-phase="ready"] .stage, body[data-phase="question"] .stage { filter: sa
   background: var(--cream); padding: .16em .62em .22em; border-radius: 99px; box-shadow: inset 0 -2px 0 rgba(0,0,0,.08);
 }
 .peg { width: 13px; height: 13px; border-radius: 50%; flex: none; background: radial-gradient(circle at 35% 35%, #FFFFFF, #CBBFB2); box-shadow: 0 1px 0 rgba(0,0,0,.3); }
+/* Presses land at once (no transition on the way down) and only ease on
+   release; transforms are composited (will-change) so a press never repaints
+   the painted art. */
+.bar, .pick, .tile, .knob, .listen, .pick .art { will-change: transform; }
+.row.down .bar, .pick.down, .tile.down, .knob.down, .listen.down, .pad.down .art { transition-duration: 0s; }
 .row.down .bar, .row.lit .bar { transform: translateY(5px); box-shadow: inset 0 2px 0 rgba(255,255,255,.35), 0 1px 0 var(--side), 0 3px 6px var(--shadow); }
 .row.lit .bar { filter: brightness(1.12) saturate(1.1); box-shadow: 0 0 0 6px color-mix(in oklab, var(--c) 35%, transparent), 0 1px 0 var(--side); }
 .row.glow .bar { animation: glow 1.8s ease-in-out infinite; }
@@ -188,11 +193,12 @@ body[data-phase="ready"] .stage, body[data-phase="question"] .stage { filter: sa
 .duo-birdfish .pick.down .art { transform: scale(.95); }
 .duo-birdfish .p1 .art { height: 80%; }
 .duo-birdfish .wing { transform-origin: 54px 62px; animation: flap 2.4s ease-in-out infinite; }
-.duo-birdfish .fish { animation: swim 3.2s ease-in-out infinite; }
+.duo-birdfish .p1:not(.lit):not(.yay):not(.down) .art { animation: swim 3.2s ease-in-out infinite; }
 .duo-birdfish .yay .wing { animation-duration: .3s; }
 .walk { transition: none; }
-.yay .walk.up { animation: climb-up 1s ease-in-out forwards; }
-.yay .walk.down { animation: climb-down 1s ease-in-out forwards; }
+/* In step with the question's replay on a right answer (--cd delay, --cl length). */
+.yay .walk.up { animation: climb-up var(--cl, 1s) ease-in-out var(--cd, 0s) both; }
+.yay .walk.down { animation: climb-down var(--cl, 1s) ease-in-out var(--cd, 0s) both; }
 .duo-stairs .pick.yay .art { animation: none; }
 
 /* ---------- help: shown, lit, dimmed ---------- */
@@ -210,7 +216,7 @@ body[data-phase="ready"] .stage, body[data-phase="question"] .stage { filter: sa
 
 /* ---------- drum along ---------- */
 .drumming { display: grid; grid-template-rows: auto minmax(0, 1fr) minmax(0, 1.25fr); gap: 10px; padding-bottom: 8px; }
-.drumming .beads { flex-wrap: wrap; height: auto; min-height: 20px; }
+.drumming .streak { min-height: 34px; }
 .bear-wrap { display: grid; place-items: center; min-height: 0; }
 .bear-wrap .art { height: 100%; max-height: 220px; width: auto; }
 .bear-wrap .paw { transform-origin: 30px 80px; transition: transform .08s; }
@@ -218,7 +224,12 @@ body[data-phase="ready"] .stage, body[data-phase="question"] .stage { filter: sa
 .bear-wrap.lit .paw { transform: rotate(14deg); } .bear-wrap.lit .p2 { transform: rotate(-14deg); }
 .pad { --pc: #FBE3C8; }
 .pad .art { height: 92%; }
-.pad.hit .art { transform: scale(.94, .9); transition: transform .05s; }
+.pad .art { transition: transform .12s ease-out; }
+.pad.down .art, .pad.hit .art { transform: scale(.94, .9); transition-duration: 0s; }
+.streak { display: flex; justify-content: center; align-items: center; gap: 6px; height: 34px; opacity: 0; transition: opacity .6s; font: 800 1.6rem/1 var(--font-display); color: var(--fg); }
+.streak.on { opacity: 1; transition-duration: .1s; }
+.streak .star { width: 30px; height: 30px; animation: none; }
+.streak.pop b { animation: pop .3s ease-out; }
 
 /* ---------- celebration ---------- */
 #fx { position: fixed; inset: 0; pointer-events: none; z-index: 5; overflow: hidden; }
@@ -307,7 +318,7 @@ body[data-phase="ready"] .stage, body[data-phase="question"] .stage { filter: sa
   .who.n3, .who.n4 { grid-template-rows: none; grid-template-columns: repeat(var(--cols, 4), 1fr); }
   .who.n3 { --cols: 3; } .who.n3 .pick:first-child { grid-column: auto; }
   .drumming { grid-template-rows: auto minmax(0, 1fr); grid-template-columns: 1fr 1.3fr; }
-  .drumming .beads { grid-column: 1 / -1; }
+  .drumming .streak { grid-column: 1 / -1; }
   .tile .cap { font-size: .85rem; }
 }
 

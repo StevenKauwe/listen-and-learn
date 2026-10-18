@@ -154,6 +154,86 @@ impl TouchGate {
     }
 }
 
+/// Free play and Drum along: instruments, not answers. Each finger sounds
+/// at contact, up to `max` fingers at once, like hands on a real
+/// xylophone. Lifting or cancelling one finger only releases that finger;
+/// notes ring out on their own and are never cut by another finger.
+#[derive(Debug, Default)]
+pub struct Fingers {
+    max: usize,
+    down: Vec<Finger>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Finger {
+    pointer: u64,
+    target: u8,
+    x: f32,
+    y: f32,
+}
+
+impl Fingers {
+    pub fn new(max: u8) -> Self {
+        Fingers {
+            max: max.max(1) as usize,
+            down: vec![],
+        }
+    }
+
+    pub fn set_max(&mut self, max: u8) {
+        self.max = max.max(1) as usize;
+    }
+
+    /// A finger landed on `target`: true if it sounds. Fingers beyond the
+    /// limit are ignored until one lifts.
+    pub fn down(&mut self, pointer: u64, target: u8, x: f32, y: f32) -> bool {
+        // A repeated down for the same finger replaces it, never doubles.
+        self.down.retain(|f| f.pointer != pointer);
+        if self.down.len() >= self.max {
+            return false;
+        }
+        self.down.push(Finger {
+            pointer,
+            target,
+            x,
+            y,
+        });
+        true
+    }
+
+    /// A finger moved. Past the swipe distance it lets go of its bar
+    /// (returned, so the bar can rise if no other finger holds it).
+    pub fn r#move(&mut self, pointer: u64, x: f32, y: f32) -> Option<u8> {
+        let i = self.down.iter().position(|f| f.pointer == pointer)?;
+        let f = self.down[i];
+        if dist(f.x, f.y, x, y) > SWIPE_CANCEL_PX {
+            self.down.remove(i);
+            return Some(f.target);
+        }
+        None
+    }
+
+    /// A finger lifted or was cancelled: the bar it held, if any.
+    pub fn up(&mut self, pointer: u64) -> Option<u8> {
+        let i = self.down.iter().position(|f| f.pointer == pointer)?;
+        Some(self.down.remove(i).target)
+    }
+
+    /// Is any finger still holding `target`?
+    pub fn holds(&self, target: u8) -> bool {
+        self.down.iter().any(|f| f.target == target)
+    }
+
+    pub fn count(&self) -> usize {
+        self.down.len()
+    }
+
+    /// Page hidden, screen change: every finger let go.
+    pub fn reset(&mut self) {
+        self.down.clear();
+    }
+}
+
 fn dist(x0: f32, y0: f32, x1: f32, y1: f32) -> f32 {
     ((x1 - x0).powi(2) + (y1 - y0).powi(2)).sqrt()
 }
@@ -233,6 +313,61 @@ mod tests {
         assert_eq!(g.cancel(1), Decision::Cancelled);
         assert_eq!(g.up(1, 100), Decision::Ignore);
         assert!(!g.is_tracking());
+    }
+
+    #[test]
+    fn fingers_sound_together_up_to_the_limit() {
+        let mut f = Fingers::new(3);
+        assert!(f.down(1, 0, 0.0, 0.0));
+        assert!(f.down(2, 2, 0.0, 90.0));
+        assert!(f.down(3, 4, 0.0, 180.0));
+        assert!(!f.down(4, 5, 0.0, 270.0), "a fourth finger past the limit");
+        assert_eq!(f.up(4), None, "the ignored finger holds nothing");
+        assert_eq!(f.up(2), Some(2));
+        assert!(f.down(5, 5, 0.0, 270.0), "room again once one lifts");
+        assert_eq!(f.count(), 3);
+    }
+
+    #[test]
+    fn one_finger_at_a_time_when_the_limit_is_one() {
+        let mut f = Fingers::new(1);
+        assert!(f.down(1, 0, 0.0, 0.0));
+        assert!(!f.down(2, 1, 0.0, 0.0));
+        assert_eq!(f.up(1), Some(0));
+        assert!(f.down(2, 1, 0.0, 0.0));
+        let mut z = Fingers::new(0);
+        assert!(z.down(1, 0, 0.0, 0.0), "never below one");
+    }
+
+    #[test]
+    fn lifting_or_cancelling_one_finger_never_releases_another() {
+        let mut f = Fingers::new(5);
+        f.down(1, 3, 0.0, 0.0);
+        f.down(2, 3, 30.0, 0.0); // two fingers on the same bar
+        f.down(3, 5, 0.0, 100.0);
+        assert_eq!(f.up(1), Some(3));
+        assert!(f.holds(3), "the other finger still holds the bar");
+        assert_eq!(f.up(3), Some(5)); // pointercancel goes through up too
+        assert!(f.holds(3) && !f.holds(5));
+        assert_eq!(f.up(3), None, "a second up is a no-op");
+        assert_eq!(f.r#move(2, 40.0, 0.0), None, "small slide keeps it");
+        assert_eq!(f.r#move(2, 130.0, 0.0), Some(3), "a swipe lets go");
+        assert!(!f.holds(3));
+        f.down(7, 1, 0.0, 0.0);
+        f.down(8, 2, 0.0, 0.0);
+        f.reset();
+        assert_eq!(f.count(), 0, "hidden page: nothing stuck");
+        assert!(f.down(7, 1, 0.0, 0.0));
+    }
+
+    #[test]
+    fn a_repeated_down_for_one_finger_never_takes_two_places() {
+        let mut f = Fingers::new(2);
+        assert!(f.down(1, 0, 0.0, 0.0));
+        assert!(f.down(1, 2, 0.0, 0.0));
+        assert_eq!(f.count(), 1);
+        assert!(f.down(2, 4, 0.0, 0.0));
+        assert_eq!(f.up(1), Some(2));
     }
 
     #[test]

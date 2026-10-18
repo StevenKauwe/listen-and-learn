@@ -48,6 +48,13 @@ impl Age {
         }
     }
 
+    /// Drum along counts on-beat drums in a row from 4: many 3–5-year-olds
+    /// cannot keep a beat yet (docs/research.md), so younger children just
+    /// drum, with nothing counted and nothing ever wrong.
+    pub fn streak(self) -> bool {
+        self >= Age::Four
+    }
+
     /// Right answers in a set before a rest (0 = no rest).
     pub fn set_len(self) -> u8 {
         match self {
@@ -97,6 +104,12 @@ pub const STEP_DOWN_MISSES: u32 = 2;
 /// Questions in a row that needed that many misses before the answer is
 /// shown again for one round.
 pub const RESHOW_AFTER: u32 = 2;
+
+/// Free play: bars that may sound at once, at every age. A hand's worth:
+/// two-year-olds touch with several fingers far more than older children
+/// (docs/research.md), and with one at a time a resting finger silences
+/// every other touch.
+pub const NOTES_AT_ONCE: u8 = 5;
 
 /// The preset for one game at one age. `slug` names the game.
 pub fn preset(age: Age, slug: &str) -> Tune {

@@ -14,7 +14,9 @@ reverse. Resting fingers, slight drags, long presses, extra fingers and
 stray swipes never scroll the page, navigate away, or count twice.
 
 Recognition, exploration and repetition, not competition: no timers,
-lives, scores, streak pressure or leaderboards in any game.
+lives, scores, streak pressure or leaderboards in any game. The one count
+is Drum along's optional streak for children of 4 and over (games.md): a
+miss only starts it again, silently.
 
 ## 2. Shared requirements (every game)
 
@@ -36,8 +38,27 @@ One gate in front of every touch target, home tiles included
 | Touch while answers are closed | ignored, never queued |
 | `pointercancel`, page hidden, screen change | gate resets, nothing stuck |
 
-Free play is the one exception to "counts on release": a bar sounds at
-contact, as a real xylophone does. One finger at a time still applies.
+Every target sounds and depresses at first contact, before the gate
+decides: an answer's own sound starts at `pointerdown`, and if the touch
+then counts, the answer sound continues from that moment instead of
+starting again. A cancelled touch (swipe) has only made its sound.
+
+Free play and Drum along are instruments, not answers: no gate. Each
+finger sounds at contact, up to the adult "notes at once" limit in Free
+play (default 5) and any number on the drum (fingers landing within 40 ms
+make one drum sound). Lifting or cancelling a finger releases only its
+own bar; notes ring out and are never cut by another finger.
+
+### 2.1a Responsiveness
+
+| Path | Target |
+|---|---|
+| Touch to sound | scheduled at the audio clock's current time (no lead) |
+| Touch to press visual | the next frame; presses have no transition on the way down |
+| Questions | 30 ms scheduling lead, so a tune's tones keep their spacing |
+| Audio context | `latencyHint: "interactive"` |
+| Sung syllables | rendered ahead of time, one per idle task, never in a touch |
+| Moving art | parts that move all the time (bear paws, bird wing) sit outside the big wobble filter; pressed elements are composited (`will-change: transform`) |
 
 The page never scrolls, zooms, selects text or shows a callout:
 `touch-action: none`, `overflow: hidden`, `overscroll-behavior: none`,
@@ -63,8 +84,14 @@ Every question game runs the same machine (`listen-core::round`).
   the question has played once in full.
 - Wrong: a gentle wiggle, the same question stays, unlimited tries. The
   question replays by itself after the tune's "replay after" misses.
-- Right: a short celebration that never delays the next round; with
-  auto-next on, the next question plays by itself. After the set length
+- Right: a short celebration that never delays the next round much; with
+  auto-next on, the next question plays by itself. In the comparison
+  games (Bird or Fish, Same or Different, Up or Down, Turtle or Rabbit,
+  Mouse or Elephant, Who's singing?) the answer's sound is followed by
+  the question once more, 1.25× closer onsets (Turtle or Rabbit at its
+  asked tempo), pitch and loudness unchanged, only tones starting within
+  1.6 s, with the chosen picture lighting and moving on each note; then
+  the chime. After the set length
   of rights (6 at age 2) the round rests with "All done!" and stars
   until Listen is pressed.
 - Help, per question (`listen-core::calib`):
@@ -93,7 +120,8 @@ Web Audio synthesis only; no sample files.
 | Property | Value |
 |---|---|
 | Tuning | equal temperament, A4 = 440 Hz; scale degrees from C4 |
-| Bar tone | sine fundamental plus gentle partials (2×, 3×, a marimba-like 3.98× and a faint 9.8× mallet tick), 26 ms attack, exponential decay over the note length |
+| Bar tone | sine fundamental plus gentle partials (2×, 3×, a marimba-like 3.98× and a faint 9.8× mallet tick), 26 ms attack (8 ms when touched), exponential decay over the note length |
+| Hand drum | pitch-dropping sine plus a tap, 1 ms attack |
 | Note length (Do Re Mi, Free play) | default 1.2 s, adult range 0.8–2.0 s |
 | Loudness | same voice and level for questions and answers; low notes lifted slightly and given more harmonics for phone speakers |
 | Bus | compressor (−10 dB, 5:1) then limiter (−2 dB, 20:1) then volume |
@@ -165,8 +193,9 @@ Then one row per game (the current one first and open), marked "changed"
 when it differs from the age preset, with: starts at and can get up to
 (ladder rungs), show the answer for the first 0/1/2/3/5 rounds, then
 light it while it plays, glow after 0–3 misses, glow after 0/3/5/8 s,
-replay after 0–3 misses, and "back to the age setting". Free play and
-Drum along show only their rung.
+replay after 0–3 misses, and "back to the age setting". Free play shows
+its rung and "notes at once" (1 · 2 · 3 · 5 · 10, default 5); Drum along
+its rung and "count beats in a row" (off at 2–3, on at 4 and 5+).
 
 ### 2.7 Platform
 
@@ -201,8 +230,8 @@ Adding a game: one module in `listen-core/src/games/` implementing `Game`
 (a two-picture game is a single `Duo` constant), one entry in `ALL`, and
 its pictures in `listen-web/src/art.rs`. The gate, round machine, audio,
 settings and layout are shared, so a game adds a few kilobytes. Current
-size: about 240 KB of wasm (100 KB gzipped) for all ten games and the
-singer, plus 39 KB of glue.
+size: about 250 KB of wasm (105 KB gzipped) for all ten games and the
+singer, plus 40 KB of glue.
 
 Build: `tools/build.sh` (`cargo build --release --target
 wasm32-unknown-unknown`, `wasm-bindgen --target web`, optional `wasm-opt

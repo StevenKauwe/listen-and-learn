@@ -1,6 +1,8 @@
 //! Drum along: a bear drums a steady beat and the child drums with it.
-//! Every touch sounds at once. At the easiest step every drum counts; on
-//! harder steps a drum counts when it lands near the bear's beat.
+//! Every touch sounds at once, and the bear drums on for as long as the
+//! child does. For older children an optional streak counts drums in a
+//! row that land near the bear's beat; a drum between beats only starts
+//! the count again, silently.
 //!
 //! Children synchronise best with a (here: animated) partner and near
 //! their own spontaneous tempo of about 400–500 ms (Kirschner & Tomasello
@@ -22,55 +24,70 @@ pub const BEAR: u8 = 1;
 pub struct Beat {
     /// Seconds between the bear's beats.
     pub ioi: f32,
-    /// Counts when within this share of `ioi` of a beat (None: any drum).
-    pub window: Option<f32>,
-    /// Beats the bear plays alone first, as a model.
+    /// The streak counts a drum within this share of `ioi` of a beat.
+    pub window: f32,
+    /// Beats the bear plays alone first, as a model (a little louder).
     pub lead_in: u32,
-    /// Counted drums that finish a round.
-    pub goal: u32,
-    /// Beats the bear plays in all before resting.
-    pub beats: u32,
 }
 
+/// Rung 0 (ages 2–3) is drumming together; its window only matters if a
+/// grown-up turns the streak on. Rungs 1–2 are the age 4 and 5+ beats.
 pub const BEATS: [Beat; 3] = [
     Beat {
         ioi: 0.5,
-        window: None,
+        window: 0.3,
         lead_in: 4,
-        goal: 8,
-        beats: 16,
     },
     Beat {
         ioi: 0.6,
-        window: Some(0.25),
+        window: 0.25,
         lead_in: 4,
-        goal: 8,
-        beats: 24,
     },
     Beat {
         ioi: 0.5,
-        window: Some(0.18),
+        window: 0.18,
         lead_in: 4,
-        goal: 10,
-        beats: 28,
     },
 ];
 
 /// Drums closer together than this count once (a hand bouncing on glass).
 pub const MIN_TAP_GAP: f32 = 0.15;
+/// Touches closer together than this make one drum sound (a palm, or two
+/// fingers landing as one hand).
+pub const SOUND_GAP: f32 = 0.04;
+/// The bear keeps drumming as long as the child does; after this long with
+/// no drum it rests until Listen.
+pub const IDLE_REST_S: f32 = 30.0;
 
 pub fn beat(step: u8) -> Beat {
     BEATS[(step as usize).min(BEATS.len() - 1)]
 }
 
-/// One round of drumming, timed on the audio clock from the first beat.
+/// How a drum landed, for the streak (when it is on).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tap {
+    /// A bounce, a second drum on the same beat, or the bear's lead-in:
+    /// changes nothing.
+    Neutral,
+    /// On a beat; the streak is now this long.
+    OnBeat(u32),
+    /// Between beats: the streak quietly starts again from 0.
+    Off,
+}
+
+/// The bear's endless beat, timed on the audio clock from the first beat.
+/// Nothing ends it but the child stopping (or leaving): no goal, no reset.
 #[derive(Clone, Debug)]
 pub struct DrumRun {
     pub beat: Beat,
     pub t0: f64,
-    pub hits: u32,
+    /// Consecutive on-beat drums.
+    pub streak: u32,
+    pub best: u32,
+    last_beat: Option<i64>,
     last_tap: Option<f64>,
-    counted: Vec<i64>,
+    last_drum: f64,
+    scheduled: u32,
 }
 
 impl DrumRun {
@@ -78,9 +95,12 @@ impl DrumRun {
         DrumRun {
             beat,
             t0,
-            hits: 0,
+            streak: 0,
+            best: 0,
+            last_beat: None,
             last_tap: None,
-            counted: vec![],
+            last_drum: t0,
+            scheduled: 0,
         }
     }
 
@@ -88,61 +108,84 @@ impl DrumRun {
         self.t0 + n as f64 * self.beat.ioi as f64
     }
 
-    /// When the bear stops.
-    pub fn end(&self) -> f64 {
-        self.beat_time(self.beat.beats) + 0.3
+    /// Beats not yet scheduled that start before `until`: (index, time).
+    /// The web layer calls this a little ahead of the audio clock, so the
+    /// bear never stops while the child drums.
+    pub fn due(&mut self, until: f64) -> Vec<(u32, f64)> {
+        let mut out = vec![];
+        while self.beat_time(self.scheduled) < until {
+            out.push((self.scheduled, self.beat_time(self.scheduled)));
+            self.scheduled += 1;
+        }
+        out
     }
 
-    /// A drum at audio time `t`. Returns whether it counted.
-    pub fn tap(&mut self, t: f64) -> bool {
+    /// The bear rests when nobody has drummed for a while.
+    pub fn resting(&self, now: f64) -> bool {
+        now - self.last_drum > IDLE_REST_S as f64
+    }
+
+    /// A drum heard at audio time `t` (already corrected for output
+    /// latency, see [`heard_at`]).
+    pub fn tap(&mut self, t: f64) -> Tap {
+        self.last_drum = self.last_drum.max(t);
         if let Some(l) = self.last_tap {
             if t - l < MIN_TAP_GAP as f64 {
-                return false;
+                return Tap::Neutral;
             }
         }
         self.last_tap = Some(t);
-        if self.done() {
-            return false;
+        let ioi = self.beat.ioi as f64;
+        let n = ((t - self.t0) / ioi).round() as i64;
+        if n < self.beat.lead_in as i64 {
+            return Tap::Neutral;
         }
-        let ok = match self.beat.window {
-            None => true,
-            Some(w) => {
-                let ioi = self.beat.ioi as f64;
-                let n = ((t - self.t0) / ioi).round() as i64;
-                let off = (t - (self.t0 + n as f64 * ioi)).abs();
-                let fresh = !self.counted.contains(&n);
-                let in_play = n >= self.beat.lead_in as i64 && n < self.beat.beats as i64;
-                if off <= w as f64 * ioi && fresh && in_play {
-                    self.counted.push(n);
-                    true
-                } else {
-                    false
-                }
-            }
+        let off = (t - (self.t0 + n as f64 * ioi)).abs();
+        if off > self.beat.window as f64 * ioi {
+            self.streak = 0;
+            return Tap::Off;
+        }
+        if self.last_beat == Some(n) {
+            return Tap::Neutral;
+        }
+        self.streak = if self.last_beat == Some(n - 1) {
+            self.streak + 1
+        } else {
+            1
         };
-        if ok {
-            self.hits += 1;
-        }
-        ok
+        self.last_beat = Some(n);
+        self.best = self.best.max(self.streak);
+        Tap::OnBeat(self.streak)
     }
 
-    pub fn done(&self) -> bool {
-        self.hits >= self.beat.goal
+    /// Beat `n` of the bear, lit on the bear.
+    pub fn beat_sound(&self, n: u32) -> Sound {
+        let lead = n < self.beat.lead_in;
+        Sound::of(vec![Tone::bar(50, 0.0, 0.3)
+            .voiced(Voice::Drum)
+            .gain(if lead { 0.9 } else { 0.6 })
+            .lit(BEAR)])
     }
+}
 
-    /// The bear's beats, lit on the bear.
-    pub fn sound(&self) -> Sound {
-        Sound::of(
-            (0..self.beat.beats)
-                .map(|n| {
-                    let lead = n < self.beat.lead_in;
-                    Tone::bar(50, n as f32 * self.beat.ioi, 0.3)
-                        .voiced(Voice::Drum)
-                        .gain(if lead { 0.9 } else { 0.6 })
-                        .lit(BEAR)
-                })
-                .collect(),
-        )
+/// When a touch was heard, on the audio clock. The child drums to the
+/// beat they *hear*, which leaves the speaker `output latency` after the
+/// audio clock schedules it, and the touch happened `event age` before
+/// the handler ran. With an output timestamp (`ctx`, `perf` from
+/// `getOutputTimestamp`, the audio time leaving the speaker at a
+/// performance time) the mapping is exact; otherwise fall back to the
+/// current time less the reported latencies.
+pub fn heard_at(
+    ctx_now: f64,
+    perf_now_ms: f64,
+    event_ms: f64,
+    stamp: Option<(f64, f64)>,
+    latency: f64,
+) -> f64 {
+    let age = ((perf_now_ms - event_ms) / 1000.0).clamp(0.0, 0.5);
+    match stamp {
+        Some((ctx, perf)) if ctx > 0.0 && perf > 0.0 => ctx + (event_ms - perf) / 1000.0,
+        _ => ctx_now - age - latency.clamp(0.0, 0.5),
     }
 }
 
@@ -191,42 +234,81 @@ impl Game for Drum {
 mod tests {
     use super::*;
 
-    #[test]
-    fn the_easiest_step_counts_every_drum_but_not_bounces() {
-        let mut r = DrumRun::new(beat(0), 10.0);
-        assert!(r.tap(10.03));
-        assert!(!r.tap(10.1), "a bounce 70 ms later counts once");
-        assert!(r.tap(10.77), "off the beat still counts at step 0");
-        assert_eq!(r.hits, 2);
+    fn on(r: &DrumRun, n: u32, off: f64) -> f64 {
+        r.beat_time(n) + off
     }
 
     #[test]
-    fn judged_steps_count_drums_near_a_beat_once_each_after_the_lead_in() {
+    fn on_beat_drums_build_a_streak_and_an_off_beat_drum_quietly_restarts_it() {
         let b = beat(1);
         let mut r = DrumRun::new(b, 0.0);
-        assert!(!r.tap(b.ioi as f64), "during the bear's lead-in");
-        let n4 = 4.0 * b.ioi as f64;
-        assert!(r.tap(n4 + 0.05));
-        assert!(!r.tap(n4 + 0.25), "same beat twice");
-        let n5 = 5.0 * b.ioi as f64;
-        assert!(r.tap(n5 - 0.1));
-        let n6 = 6.0 * b.ioi as f64;
-        assert!(!r.tap(n6 + 0.5 * b.ioi as f64 - 0.01), "half a beat off");
-        assert_eq!(r.hits, 2);
+        assert_eq!(r.tap(on(&r, 1, 0.0)), Tap::Neutral, "the bear's lead-in");
+        assert_eq!(r.tap(on(&r, 4, 0.05)), Tap::OnBeat(1));
+        assert_eq!(r.tap(on(&r, 4, 0.2)), Tap::Neutral, "same beat twice");
+        assert_eq!(r.tap(on(&r, 5, -0.1)), Tap::OnBeat(2));
+        assert_eq!(r.tap(on(&r, 6, 0.0)), Tap::OnBeat(3));
+        assert_eq!(r.tap(on(&r, 6, 0.3)), Tap::Off, "half a beat off");
+        assert_eq!(r.streak, 0);
+        assert_eq!(r.tap(on(&r, 7, 0.0)), Tap::OnBeat(1));
+        assert_eq!(r.tap(on(&r, 9, 0.0)), Tap::OnBeat(1), "a skipped beat");
+        assert_eq!(r.best, 3);
     }
 
     #[test]
-    fn a_round_ends_at_the_goal_and_the_bear_leaves_room_to_reach_it() {
-        for b in BEATS {
-            assert!(b.beats >= b.lead_in + b.goal * 3 / 2, "{b:?}");
-            assert!((0.4..=0.6).contains(&b.ioi), "near children's own tempo");
-            let mut r = DrumRun::new(b, 0.0);
-            for n in b.lead_in..b.beats {
-                r.tap(r.beat_time(n));
-            }
-            assert!(r.done());
-            assert_eq!(r.hits, b.goal);
-            assert_eq!(r.sound().tones.len() as u32, b.beats);
+    fn bounces_count_once_and_never_break_a_streak() {
+        let mut r = DrumRun::new(beat(2), 0.0);
+        assert_eq!(r.tap(on(&r, 4, 0.0)), Tap::OnBeat(1));
+        assert_eq!(r.tap(on(&r, 4, 0.07)), Tap::Neutral);
+        assert_eq!(r.tap(on(&r, 5, 0.0)), Tap::OnBeat(2));
+    }
+
+    #[test]
+    fn windows_follow_the_age_rungs() {
+        // Age 4: ±25 % of 600 ms; 5+: ±18 % of 500 ms (docs/research.md).
+        for (step, inside, outside) in [(1u8, 0.145, 0.16), (2, 0.085, 0.095), (0, 0.145, 0.16)] {
+            let mut r = DrumRun::new(beat(step), 0.0);
+            assert_eq!(r.tap(on(&r, 4, inside)), Tap::OnBeat(1), "step {step}");
+            assert_eq!(r.tap(on(&r, 5, -outside)), Tap::Off, "step {step}");
         }
+        for b in BEATS {
+            assert!((0.4..=0.6).contains(&b.ioi), "near children's own tempo");
+        }
+    }
+
+    #[test]
+    fn the_bear_never_stops_while_the_child_drums_and_rests_when_they_stop() {
+        let b = beat(0);
+        let mut r = DrumRun::new(b, 0.0);
+        let mut n = 0;
+        let mut t = 0.0;
+        while t < 300.0 {
+            for (i, at) in r.due(t + 1.0) {
+                assert_eq!(i, n, "every beat once, in order");
+                assert!((at - r.beat_time(i)).abs() < 1e-9);
+                n += 1;
+            }
+            if ((t * 4.0) as u32).is_multiple_of(4) {
+                r.tap(t);
+            }
+            assert!(!r.resting(t), "drumming at {t}");
+            t += 0.25;
+        }
+        assert!(n as f64 >= 300.0 / b.ioi as f64, "five minutes of beat");
+        assert!(r.resting(t + IDLE_REST_S as f64 + 1.0));
+        assert_eq!(r.beat_sound(0).tones[0].light, Some(BEAR));
+        assert!(r.beat_sound(0).tones[0].gain > r.beat_sound(9).tones[0].gain);
+    }
+
+    #[test]
+    fn heard_time_corrects_for_output_latency_and_event_age() {
+        // Output stamp: audio time 10.0 left the speaker at perf 5000 ms.
+        let t = heard_at(10.2, 5200.0, 5180.0, Some((10.0, 5000.0)), 0.0);
+        assert!((t - 10.18).abs() < 1e-9);
+        // No stamp: now, less the touch's age, less the reported latency.
+        let t = heard_at(10.2, 5200.0, 5180.0, None, 0.05);
+        assert!((t - (10.2 - 0.02 - 0.05)).abs() < 1e-9);
+        // Absurd values are bounded.
+        let t = heard_at(10.0, 5000.0, 0.0, None, 9.0);
+        assert!((t - 9.0).abs() < 1e-9);
     }
 }

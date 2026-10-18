@@ -1,12 +1,12 @@
 //! Web Audio synthesis. Warm bar tone: strong fundamental, gentle partials
-//! (a marimba-like fourth harmonic and a faint mallet tick), 26 ms attack,
-//! exponential decay. Every voice goes through a compressor and a limiter
+//! (a marimba-like fourth harmonic and a faint mallet tick), 26 ms attack
+//! (8 ms when touched, so a tap is heard at once), exponential decay. Every voice goes through a compressor and a limiter
 //! before the volume, so loudness is even and nothing clips.
 
 use listen_core::music::{freq, Sound, Tone, Voice};
 use listen_core::voice;
 use std::collections::HashMap;
-use wasm_bindgen::JsValue;
+use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{AudioBuffer, AudioContext, AudioContextState, BiquadFilterType, GainNode};
 
 pub struct Audio {
@@ -19,6 +19,8 @@ pub struct Audio {
     /// Sung syllables rendered by the core singer, keyed by
     /// (syllable, MIDI note, length in ms).
     sung: HashMap<(u8, u32, u32), AudioBuffer>,
+    /// Attack override while scheduling a touch (None: the voice's own).
+    attack: Option<f64>,
 }
 
 /// iPhones mute Web Audio when the ring/silent switch is on, unlike media
@@ -96,12 +98,18 @@ fn base64(bytes: &[u8]) -> String {
     s
 }
 
-/// Lead time so the first partial never starts in the past.
+/// Lead time for questions, so a tune's first tone never starts in the
+/// past while its later tones are scheduled. Touches use no lead.
 const LEAD: f64 = 0.03;
+/// A touched bar's attack: the same tone, struck at once.
+const TOUCH_ATTACK: f64 = 0.008;
 
 impl Audio {
     pub fn new(volume: f32) -> Result<Audio, JsValue> {
-        let ctx = AudioContext::new()?;
+        // "interactive" is the default, but say so: the smallest buffer.
+        let opts = web_sys::AudioContextOptions::new();
+        opts.set_latency_hint(&JsValue::from_str("interactive"));
+        let ctx = AudioContext::new_with_context_options(&opts).or_else(|_| AudioContext::new())?;
         let comp = ctx.create_dynamics_compressor()?;
         comp.threshold().set_value(-10.0);
         comp.knee().set_value(8.0);
@@ -129,6 +137,7 @@ impl Audio {
             primed: false,
             unmuted: false,
             sung: HashMap::new(),
+            attack: None,
         })
     }
 
@@ -186,28 +195,88 @@ impl Audio {
 
     /// Schedule a sound; returns its start time on the audio clock.
     pub fn play(&mut self, s: &Sound) -> f64 {
+        let t0 = self.now() + LEAD;
+        self.play_at(s, t0, 0)
+    }
+
+    /// A touch: no lead, a struck attack. The first tone starts at the
+    /// audio clock's "now" (the next render quantum).
+    pub fn play_touch(&mut self, s: &Sound) -> f64 {
+        self.attack = Some(TOUCH_ATTACK);
+        let t0 = self.now();
+        let t = self.play_at(s, t0, 0);
+        self.attack = None;
+        t
+    }
+
+    /// Schedule `s` from `t0`, skipping its first `skip` tones (already
+    /// sounded at contact). Returns `t0`.
+    pub fn play_at(&mut self, s: &Sound, t0: f64, skip: usize) -> f64 {
         let now = self.now();
         self.voices.retain(|(_, end)| *end > now);
-        let t0 = now + LEAD;
-        for t in &s.tones {
-            let _ = self.tone(t, t0 + t.at as f64);
+        for t in s.tones.iter().skip(skip) {
+            let _ = self.tone(t, (t0 + t.at as f64).max(now));
         }
         t0
     }
 
+    /// Render a sound's sung syllables ahead of time, so the first right
+    /// answer never waits on the singer. Returns how many were rendered.
+    pub fn warm(&mut self, s: &Sound) -> usize {
+        let mut n = 0;
+        for t in &s.tones {
+            if let Voice::Sing(syl) = t.voice {
+                if self.sung_buffer(syl, t).is_some() {
+                    n += 1;
+                }
+            }
+        }
+        n
+    }
+
+    /// Audio time now leaving the speaker at performance time, if the
+    /// browser reports it (`getOutputTimestamp`).
+    pub fn output_stamp(&self) -> Option<(f64, f64)> {
+        let ctx: &JsValue = self.ctx.as_ref();
+        let f = js_sys::Reflect::get(ctx, &"getOutputTimestamp".into()).ok()?;
+        let f: js_sys::Function = f.dyn_into().ok()?;
+        let v = f.call0(ctx).ok()?;
+        let c = js_sys::Reflect::get(&v, &"contextTime".into())
+            .ok()?
+            .as_f64()?;
+        let p = js_sys::Reflect::get(&v, &"performanceTime".into())
+            .ok()?
+            .as_f64()?;
+        Some((c, p))
+    }
+
+    /// Reported delay from the audio clock to the speaker, seconds.
+    pub fn latency(&self) -> f64 {
+        let ctx: &JsValue = self.ctx.as_ref();
+        ["baseLatency", "outputLatency"]
+            .iter()
+            .filter_map(|k| js_sys::Reflect::get(ctx, &(*k).into()).ok()?.as_f64())
+            .filter(|v| v.is_finite())
+            .sum()
+    }
+
     /// A sung syllable: rendered once by the core's formant singer at the
     /// tone's exact pitch, then played from a buffer.
-    fn sing(&mut self, syl: u8, t: &Tone, at: f64) -> Result<(), JsValue> {
+    fn sung_buffer(&mut self, syl: u8, t: &Tone) -> Option<AudioBuffer> {
         let key = (syl, (t.midi * 100.0) as u32, (t.dur * 1000.0) as u32);
         if !self.sung.contains_key(&key) {
             let sr = self.ctx.sample_rate();
             let s = voice::SYLLABLES[(syl as usize).min(6)];
             let pcm = voice::render(s, t.midi, t.dur, sr);
-            let buf = self.ctx.create_buffer(1, pcm.len() as u32, sr)?;
-            buf.copy_to_channel(&pcm, 0)?;
+            let buf = self.ctx.create_buffer(1, pcm.len() as u32, sr).ok()?;
+            buf.copy_to_channel(&pcm, 0).ok()?;
             self.sung.insert(key, buf);
         }
-        let buf = &self.sung[&key];
+        self.sung.get(&key).cloned()
+    }
+
+    fn sing(&mut self, syl: u8, t: &Tone, at: f64) -> Result<(), JsValue> {
+        let buf = &self.sung_buffer(syl, t).ok_or("no buffer")?;
         let src = self.ctx.create_buffer_source()?;
         src.set_buffer(Some(buf));
         let g = self.ctx.create_gain()?;
@@ -232,9 +301,10 @@ impl Audio {
         let env = ctx.create_gain()?;
         let g = env.gain();
         let peak = 0.55 * t.gain;
+        // Percussive: a 1 ms ramp (instant, but no click), then decay.
         g.set_value_at_time(0.0, at)?;
-        g.linear_ramp_to_value_at_time(peak, at + 0.004)?;
-        g.set_target_at_time(0.0, at + 0.004, 0.07)?;
+        g.linear_ramp_to_value_at_time(peak, at + 0.001)?;
+        g.set_target_at_time(0.0, at + 0.001, 0.07)?;
         osc.connect_with_audio_node(&env)?;
         env.connect_with_audio_node(&self.bus)?;
         osc.start_with_when(at)?;
@@ -312,6 +382,7 @@ impl Audio {
             let env = ctx.create_gain()?;
             let g = env.gain();
             g.set_value_at_time(0.0, at)?;
+            let atk = self.attack.map(|a| a.min(atk)).unwrap_or(atk);
             let a = if ratio > 3.0 { atk * 0.6 } else { atk };
             g.linear_ramp_to_value_at_time(amp, at + a)?;
             g.set_target_at_time(0.0, at + a, (dur * decay as f64 / 3.2).max(0.02))?;

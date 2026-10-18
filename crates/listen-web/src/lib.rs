@@ -7,10 +7,12 @@ mod audio;
 mod view;
 
 use audio::Audio;
-use listen_core::calib::preset;
 use listen_core::games::drum::{self, DrumRun};
+use listen_core::music::Sound;
 use listen_core::settings::{HOLD_HOME_MS, HOLD_SETTINGS_MS, NOTE_LEN};
-use listen_core::{by_slug, Age, Decision, Effect, Event, Phase, Round, Settings, TouchGate, ALL};
+use listen_core::{
+    by_slug, Age, Decision, Effect, Event, Fingers, Phase, Round, Settings, TouchGate, ALL,
+};
 use std::cell::RefCell;
 use view::{T_FULLSCREEN, T_LISTEN, T_TILE};
 use wasm_bindgen::prelude::*;
@@ -113,7 +115,20 @@ struct App {
     audio: Option<Audio>,
     audio_failed: bool,
     gate: TouchGate,
+    /// Free play and Drum along: one entry per finger on an instrument.
+    fingers: Fingers,
     pressed: Option<Element>,
+    /// An answer sounded at contact: (target, start on the audio clock,
+    /// the sound). The answer's own sound, when it comes, continues it.
+    contact: Option<(u8, f64, Sound)>,
+    /// The contact sound handed to the next `Effect::Play`.
+    contact_play: Option<(u8, f64, Sound)>,
+    /// When the last `Effect::Play` started, on the audio clock.
+    last_play: f64,
+    /// Drum along: when the child's drum last sounded.
+    last_drum: f64,
+    /// Sounds with sung syllables to render ahead of time.
+    warm: Vec<Sound>,
     hold: Option<Hold>,
     hold_id: u32,
     screen: Screen,
@@ -168,7 +183,13 @@ pub fn start() -> Result<(), JsValue> {
         audio: None,
         audio_failed: false,
         gate: TouchGate::new(),
+        fingers: Fingers::new(1),
         pressed: None,
+        contact: None,
+        contact_play: None,
+        last_play: 0.0,
+        last_drum: f64::NEG_INFINITY,
+        warm: vec![],
         hold: None,
         hold_id: 0,
         screen: Screen::Home,
@@ -294,7 +315,10 @@ impl App {
     fn unlock_audio(&mut self) {
         if self.audio.is_none() && !self.audio_failed {
             match Audio::new(self.settings.volume) {
-                Ok(a) => self.audio = Some(a),
+                Ok(a) => {
+                    self.audio = Some(a);
+                    self.warm_later(self.epoch);
+                }
                 Err(_) => self.audio_failed = true,
             }
         }
@@ -313,18 +337,44 @@ impl App {
         self.body.set_attribute("data-audio", s).ok();
     }
 
-    fn play(&mut self, s: &listen_core::music::Sound) {
+    fn play(&mut self, s: &Sound) {
         let Some(a) = self.audio.as_mut() else { return };
         let t0 = a.play(s);
-        self.play_lights(s, t0);
+        self.last_play = t0;
+        self.play_lights(s, t0, 0);
+    }
+
+    /// A touch: sounds at the audio clock's "now", no lead.
+    fn play_touch(&mut self, s: &Sound) -> f64 {
+        let Some(a) = self.audio.as_mut() else {
+            return 0.0;
+        };
+        let t0 = a.play_touch(s);
+        self.play_lights(s, t0, 0);
+        t0
+    }
+
+    /// The rest of a sound whose first `skip` tones sounded at contact,
+    /// `t0`. Later tones keep their spacing; if the finger was held past
+    /// the next one, everything after shifts to start now.
+    fn play_after_contact(&mut self, s: &Sound, t0: f64, skip: usize) {
+        let Some(a) = self.audio.as_mut() else { return };
+        let now = a.now();
+        let base = match s.tones.get(skip) {
+            Some(t) => t0.max(now - t.at as f64),
+            None => t0,
+        };
+        a.play_at(s, base, skip);
+        self.last_play = base;
+        self.play_lights(s, base, skip);
     }
 
     /// Light targets in time with their tones.
-    fn play_lights(&mut self, s: &listen_core::music::Sound, t0: f64) {
+    fn play_lights(&mut self, s: &Sound, t0: f64, skip: usize) {
         let Some(a) = self.audio.as_ref() else { return };
         let lead = t0 - a.now();
         let ep = self.epoch;
-        for t in &s.tones {
+        for t in s.tones.iter().skip(skip) {
             if let Some(target) = t.light {
                 let on = (lead + t.at as f64) * 1000.0;
                 let off = on + t.dur as f64 * 800.0;
@@ -375,27 +425,55 @@ impl App {
             return;
         }
         let Some((tel, id)) = data_t(&el) else { return };
+        let pid = e.pointer_id() as u32 as u64;
+        if self.free() && id < T_LISTEN {
+            // An instrument: every finger (up to the limit) sounds at
+            // contact; no gate, no answers.
+            if self.is_open(id) && self.fingers.down(pid, id, x as f32, y as f32) {
+                let _ = tel.class_list().add_1("down");
+                let _ = tel.set_pointer_capture(e.pointer_id());
+                self.free_play(id, &tel, Some(e));
+            }
+            return;
+        }
         let open = self.is_open(id);
-        let d = self.gate.down(
-            e.pointer_id() as u32 as u64,
-            id,
-            x as f32,
-            y as f32,
-            self.now_ms(),
-            open,
-        );
+        let d = self
+            .gate
+            .down(pid, id, x as f32, y as f32, self.now_ms(), open);
         if d == Decision::Track {
             let _ = tel.class_list().add_1("down");
             let _ = tel.set_pointer_capture(e.pointer_id());
             self.pressed = Some(tel.clone());
-            if self.free() && id < T_LISTEN {
-                self.free_play(id, &tel);
+            // Answers sound at contact too; the gate still decides on
+            // release whether the touch is an answer.
+            self.contact = None;
+            if id < T_LISTEN {
+                if let Some(s) = self.round.as_ref().and_then(|r| r.touch_sound(id)) {
+                    let t0 = self.play_touch(&s);
+                    self.contact = Some((id, t0, s));
+                }
+            }
+        }
+    }
+
+    /// A finger let go of instrument target `t`: it rises unless another
+    /// finger still holds it.
+    fn release_target(&mut self, t: u8) {
+        if !self.fingers.holds(t) {
+            if let Some(el) = self.target(t) {
+                let _ = el.class_list().remove_1("down");
             }
         }
     }
 
     fn on_move(&mut self, e: &PointerEvent) {
         let (x, y) = (e.client_x() as f64, e.client_y() as f64);
+        if let Some(t) = self
+            .fingers
+            .r#move(e.pointer_id() as u32 as u64, x as f32, y as f32)
+        {
+            self.release_target(t);
+        }
         if let Some(h) = &self.hold {
             if h.pointer == e.pointer_id()
                 && ((x - h.x).powi(2) + (y - h.y).powi(2)).sqrt() > HOLD_SLOP
@@ -422,6 +500,9 @@ impl App {
             self.hold_cancel(!cancel);
         }
         let pid = e.pointer_id() as u32 as u64;
+        if let Some(t) = self.fingers.up(pid) {
+            self.release_target(t);
+        }
         let d = if cancel {
             self.gate.cancel(pid)
         } else {
@@ -434,7 +515,10 @@ impl App {
                     self.accept(id);
                 }
             }
-            Decision::Cancelled => self.release_pressed(),
+            Decision::Cancelled => {
+                self.contact = None;
+                self.release_pressed();
+            }
             _ => {}
         }
         self.unlock_audio();
@@ -448,7 +532,11 @@ impl App {
 
     fn reset_input(&mut self) {
         self.gate.reset();
+        self.fingers.reset();
+        self.contact = None;
+        self.contact_play = None;
         self.release_pressed();
+        self.clear_class("down");
         self.hold_cancel(false);
     }
 
@@ -474,7 +562,7 @@ impl App {
         } else if let Some((tel, id)) = data_t(&el) {
             if self.is_open(id) {
                 if self.free() && id < T_LISTEN {
-                    self.free_play(id, &tel);
+                    self.free_play(id, &tel, None);
                 } else {
                     self.accept(id);
                 }
@@ -529,7 +617,9 @@ impl App {
                     Some(r) => r.handle(Event::Answer(t)),
                     None => return,
                 };
+                self.contact_play = self.contact.take().filter(|c| c.0 == t);
                 self.run(fx);
+                self.contact_play = None;
             }
         }
     }
@@ -646,6 +736,30 @@ impl App {
             t
         };
         self.drum = None;
+        self.fingers.set_max(if g.beat() {
+            10
+        } else {
+            self.settings.notes_at_once
+        });
+        // Sung syllables a touch may need, rendered ahead of time.
+        self.warm.clear();
+        if let Some(r) = &self.round {
+            let k = r.knobs();
+            for &t in &targets {
+                self.warm.push(g.answer_sound(k, t));
+                if r.q.sing.is_some() {
+                    let d = listen_core::music::SCALE[t as usize];
+                    self.warm.push(Sound::default().with_name(t, d.midi, 0.0));
+                }
+            }
+            self.warm.push(r.q.sound.clone());
+        }
+        self.warm.retain(|s| {
+            s.tones
+                .iter()
+                .any(|t| matches!(t.voice, listen_core::music::Voice::Sing(_)))
+        });
+        self.warm_later(self.epoch);
         self.root.set_inner_html(&view::game(g, &targets));
         self.body.set_attribute("data-route", g.slug()).ok();
         self.wake();
@@ -694,7 +808,12 @@ impl App {
     fn run(&mut self, fx: Vec<Effect>) {
         for e in fx {
             match e {
-                Effect::Play(s) => self.play(&s),
+                Effect::Play(s) => match self.contact_play.take() {
+                    Some((_, t0, c)) if s.tones.starts_with(&c.tones) => {
+                        self.play_after_contact(&s, t0, c.tones.len())
+                    }
+                    _ => self.play(&s),
+                },
                 Effect::StopAudio => {
                     if let Some(a) = self.audio.as_mut() {
                         a.stop_all();
@@ -727,14 +846,30 @@ impl App {
                         secs as f64 * 1000.0 + 40.0,
                     );
                 }
-                Effect::Right { target, name } => {
+                Effect::Right {
+                    target,
+                    name,
+                    confirm,
+                } => {
                     let text = match name {
                         Some(n) => format!("{}<span>{n}!</span>", art::STAR),
                         None => format!("{}<span>Yes!</span>", art::STAR),
                     };
                     self.set_msg(&text, "yay");
                     if let Some(el) = self.target(target) {
-                        self.flash_class(&el, "yay", 900.0);
+                        // The picture moves with the question's replay
+                        // (the walker climbs as the tune rises).
+                        let mut ms = 900.0;
+                        if let (Some((at, len)), Some(a)) = (confirm, self.audio.as_ref()) {
+                            let delay = (self.last_play + at as f64 - a.now()).max(0.0);
+                            el.set_attribute(
+                                "style",
+                                &format!("--cd:{delay:.3}s;--cl:{:.3}s", len.max(0.3)),
+                            )
+                            .ok();
+                            ms = f64::max(ms, (delay + len as f64) * 1000.0 + 250.0);
+                        }
+                        self.flash_class(&el, "yay", ms);
                         self.sparks(&el, target);
                     }
                 }
@@ -886,9 +1021,12 @@ impl App {
 
     fn flash_class(&self, el: &Element, class: &str, ms: f64) {
         let cl = el.class_list();
-        let _ = cl.remove_1(class);
-        // Force a style flush so the animation restarts.
-        let _ = el.get_bounding_client_rect();
+        if cl.contains(class) {
+            let _ = cl.remove_1(class);
+            // Force a style flush so the animation restarts (only then:
+            // a forced layout in a touch handler costs time).
+            let _ = el.get_bounding_client_rect();
+        }
         let _ = cl.add_1(class);
         let el = el.clone();
         let class = class.to_string();
@@ -926,14 +1064,25 @@ impl App {
         }
     }
 
-    fn free_play(&mut self, id: u8, el: &Element) {
+    /// An instrument touch (Free play bar, Drum along drum): it sounds
+    /// first, then the visuals follow.
+    fn free_play(&mut self, id: u8, el: &Element, e: Option<&PointerEvent>) {
         let i = match self.screen {
             Screen::Game(i) => i,
             _ => return,
         };
         let g = ALL[i];
         let k = self.settings.round_cfg(i).knobs;
-        self.play(&g.answer_sound(k, id));
+        let sound = g.answer_sound(k, id);
+        if g.beat() {
+            // Fingers landing together (a palm) make one drum sound.
+            let now = self.audio.as_ref().map(|a| a.now()).unwrap_or(0.0);
+            if now - self.last_drum >= drum::SOUND_GAP as f64 {
+                self.last_drum = self.play_touch(&sound);
+            }
+        } else {
+            self.play_touch(&sound);
+        }
         let n = self
             .body
             .get_attribute("data-guesses")
@@ -943,8 +1092,8 @@ impl App {
             .set_attribute("data-guesses", &(n + 1).to_string())
             .ok();
         if g.beat() {
-            self.flash_class(el, "hit", 220.0);
-            return self.drum_tap();
+            self.flash_class(el, "hit", 160.0);
+            return self.drum_tap(e);
         }
         self.flash_class(el, "yay", 600.0);
         let Some(fx) = self.doc.get_element_by_id("fx") else {
@@ -967,6 +1116,25 @@ impl App {
             let _ = fx.append_child(&s);
             after(1300.0, move || s.remove());
         }
+    }
+
+    /// Render the next waiting sung syllable, one per task, so no touch
+    /// ever waits on the singer.
+    fn warm_later(&mut self, ep: u32) {
+        if self.warm.is_empty() || self.audio.is_none() {
+            return;
+        }
+        after(120.0, move || {
+            with(|a| {
+                if a.epoch != ep {
+                    return;
+                }
+                if let (Some(s), Some(au)) = (a.warm.pop(), a.audio.as_mut()) {
+                    au.warm(&s);
+                }
+                a.warm_later(ep);
+            });
+        });
     }
 
     fn clear_class(&self, class: &str) {
@@ -998,7 +1166,8 @@ impl App {
 
     // ---------- drum along ----------
 
-    /// Start the bear drumming once audio runs (like a question).
+    /// Start the bear drumming once audio runs (like a question). It
+    /// drums on for as long as the child does.
     fn drum_start(&mut self, ep: u32, tries: u32) {
         if ep != self.epoch || self.drum.is_some() {
             return;
@@ -1017,60 +1186,111 @@ impl App {
         }
         let Screen::Game(i) = self.screen else { return };
         let beat = drum::beat(self.settings.tunes[i].lo);
-        let sound = DrumRun::new(beat, 0.0).sound();
-        let Some(au) = self.audio.as_mut() else {
+        let Some(au) = self.audio.as_ref() else {
             return;
         };
-        let t0 = au.play(&sound);
-        let run = DrumRun::new(beat, t0);
-        let end_ms = (run.end() - au.now()) * 1000.0;
-        self.drum = Some(run);
-        self.play_lights(&sound, t0);
-        if let Some(b) = self.doc.get_element_by_id("beads") {
-            b.set_inner_html(&view::drum_beads(beat.goal as usize, 0));
-        }
+        self.drum = Some(DrumRun::new(beat, au.now() + 0.1));
+        self.show_streak(0);
         self.set_msg("<span>Drum!</span>", "");
         self.sync();
-        let ep = self.epoch;
-        after(end_ms, move || {
-            with(|a| a.drum_end(ep));
-        });
+        self.drum_tick(ep);
     }
 
-    fn drum_tap(&mut self) {
+    /// Keep about half a second of the bear's beat scheduled ahead.
+    fn drum_tick(&mut self, ep: u32) {
+        if ep != self.epoch {
+            return;
+        }
         let Some(now) = self.audio.as_ref().map(|a| a.now()) else {
             return;
         };
         let Some(run) = self.drum.as_mut() else {
             return;
         };
-        let counted = run.tap(now);
-        let (hits, goal, done) = (run.hits, run.beat.goal, run.done());
+        if run.resting(now) {
+            return self.drum_end(ep);
+        }
+        let due: Vec<(Sound, f64)> = run
+            .due(now + 0.5)
+            .into_iter()
+            .map(|(n, at)| (run.beat_sound(n), at))
+            .collect();
+        for (s, at) in due {
+            if let Some(a) = self.audio.as_mut() {
+                a.play_at(&s, at, 0);
+            }
+            self.play_lights(&s, at, 0);
+        }
+        after(150.0, move || {
+            with(|a| a.drum_tick(ep));
+        });
+    }
+
+    /// Judge a drum against the beat the child heard: the touch's own
+    /// time, less the delay from the audio clock to the speaker.
+    fn drum_tap(&mut self, e: Option<&PointerEvent>) {
+        let Some(au) = self.audio.as_ref() else {
+            return;
+        };
+        let perf = self.win.performance().map(|p| p.now()).unwrap_or(0.0);
+        let ev = e.map(|e| e.time_stamp()).unwrap_or(perf);
+        let heard = drum::heard_at(au.now(), perf, ev, au.output_stamp(), au.latency());
+        let Some(run) = self.drum.as_mut() else {
+            return;
+        };
+        let tap = run.tap(heard);
+        let streak = run.streak;
         // For the browser harness only; never rendered.
-        self.body.set_attribute("data-hits", &hits.to_string()).ok();
-        if !counted {
+        let n = self
+            .body
+            .get_attribute("data-hits")
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(0);
+        self.body
+            .set_attribute("data-hits", &(n + 1).to_string())
+            .ok();
+        self.body
+            .set_attribute("data-streak", &streak.to_string())
+            .ok();
+        if !self.settings.streak {
             return;
         }
-        if let Some(b) = self.doc.get_element_by_id("beads") {
-            b.set_inner_html(&view::drum_beads(goal as usize, hits as usize));
+        match tap {
+            drum::Tap::OnBeat(k) => {
+                self.show_streak(k);
+                if k > 0 && k % 8 == 0 {
+                    if let Some(el) = self.doc.get_element_by_id("streak") {
+                        self.sparks(&el, (k / 8) as u8);
+                    }
+                }
+            }
+            drum::Tap::Off => self.show_streak(0),
+            drum::Tap::Neutral => {}
         }
-        if done {
-            self.set_msg(&format!("{}<span>Yes!</span>", art::STAR), "yay");
-            self.confetti();
-            let mut s = listen_core::music::Sound::default().with_chime(0.0);
-            s.dur = 1.0;
-            self.play(&s);
+    }
+
+    /// The streak number (when the grown-up setting is on). A miss only
+    /// fades it away; nothing sounds, nothing is wrong.
+    fn show_streak(&self, n: u32) {
+        let Some(el) = self.doc.get_element_by_id("streak") else {
+            return;
+        };
+        if !self.settings.streak || n == 0 {
+            let _ = el.class_list().remove_1("on");
+            return;
         }
+        el.set_inner_html(&view::streak(n));
+        let _ = el.class_list().add_1("on");
+        self.flash_class(&el, "pop", 300.0);
     }
 
     fn drum_end(&mut self, ep: u32) {
         if ep != self.epoch {
             return;
         }
-        let done = self.drum.as_ref().map(|r| r.done()).unwrap_or(false);
         self.drum = None;
-        let text = if done { "Again?" } else { "Listen!" };
-        self.set_msg(&format!("<span>{text}</span>"), "");
+        self.show_streak(0);
+        self.set_msg("<span>Listen!</span>", "");
         self.sync();
     }
 
@@ -1081,6 +1301,7 @@ impl App {
                 a.stop_all();
             }
             self.clear_class("lit");
+            self.show_streak(0);
         }
     }
 
@@ -1242,6 +1463,15 @@ impl App {
                     self.settings.set_age(*a);
                 }
             }
+            ["chord", i] => {
+                if let Some(n) = i
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|i| listen_core::settings::NOTES_AT_ONCE.get(i))
+                {
+                    self.settings.notes_at_once = *n;
+                }
+            }
             ["set", i] => {
                 if let Some(n) = i.parse::<usize>().ok().and_then(|i| view::SET_LENS.get(i)) {
                     self.settings.set_len = *n;
@@ -1265,9 +1495,8 @@ impl App {
             }
             ["t", i, "preset"] => {
                 if let Ok(i) = i.parse::<usize>() {
-                    if let Some(g) = ALL.get(i) {
-                        self.settings.tunes[i] =
-                            preset(self.settings.age, g.slug()).clamped(g.steps().len());
+                    if i < ALL.len() {
+                        self.settings.to_preset(i);
                     }
                 }
             }
@@ -1277,6 +1506,7 @@ impl App {
                     "sing" => s.sing = !s.sing,
                     "cheer" => s.cheer = !s.cheer,
                     "auto_next" => s.auto_next = !s.auto_next,
+                    "streak" => s.streak = !s.streak,
                     _ => {}
                 }
             }

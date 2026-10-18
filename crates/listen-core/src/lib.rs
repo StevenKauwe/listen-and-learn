@@ -12,6 +12,6 @@ pub mod voice;
 
 pub use calib::{Age, Help, Tune};
 pub use games::{by_slug, Game, Knobs, Question, ALL};
-pub use gate::{Decision, TouchGate};
+pub use gate::{Decision, Fingers, TouchGate};
 pub use round::{Effect, Event, Phase, Round, RoundCfg};
 pub use settings::Settings;

@@ -83,6 +83,9 @@ impl Game for Who {
     fn hint(&self) -> Sound {
         Sound::of(vec![note(SINGER, 67, 0.0), note(XYLO, 64, 0.45)])
     }
+    fn confirm_speed(&self) -> Option<f32> {
+        Some(super::CONFIRM_SPEED)
+    }
 }
 
 #[cfg(test)]

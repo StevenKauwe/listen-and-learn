@@ -5,8 +5,16 @@
 const INK: &str = "#2E2630";
 
 fn svg(body: &str) -> String {
+    svg_moving(body, "")
+}
+
+/// Parts that move all the time (a wing, the bear's paws) are each
+/// wobbled on their own: moving anything inside the big filtered group
+/// would redraw the whole picture's filter on every frame, which is slow
+/// on phones and delays touches.
+fn svg_moving(body: &str, moving: &str) -> String {
     format!(
-        r#"<svg class="art" viewBox="0 0 120 120" aria-hidden="true"><g filter="url(#wob)">{body}</g></svg>"#
+        r#"<svg class="art" viewBox="0 0 120 120" aria-hidden="true"><g filter="url(#wob)">{body}</g>{moving}</svg>"#
     )
 }
 
@@ -24,12 +32,19 @@ fn cheek(x: f32, y: f32) -> String {
 }
 
 pub fn bird() -> String {
+    bird_with(WING)
+}
+
+const WING: &str =
+    r##"<path class="k wing" fill="#E2603F" d="M38 63 q14 -21 33 -4 q-14 16 -33 4z"/>"##;
+
+fn bird_with(wing: &str) -> String {
     format!(
         r##"<g class="bird"><path class="k" fill="#E2603F" d="M34 64 L11 53 L16 67 L10 80 L35 73Z"/>
 <ellipse class="k" fill="#F2845C" cx="58" cy="68" rx="30" ry="22"/>
 <path fill="#FCD9C2" d="M42 78 q18 12 38 -2 q-6 13 -21 13 q-12 0 -17 -11z"/>
 <circle class="k" fill="#F2845C" cx="80" cy="49" r="16"/>
-<path class="k wing" fill="#E2603F" d="M38 63 q14 -21 33 -4 q-14 16 -33 4z"/>
+{wing}
 <path class="k" fill="#F6B93B" d="M95 45 l13 5 -13 6z"/>{}{}
 <path class="k" fill="none" d="M52 89 l-3 10 M66 89 l3 10"/></g>"##,
         eye(84.0, 45.0, 3.4),
@@ -230,9 +245,7 @@ pub fn bear() -> String {
         r##"<g class="bear"><circle class="k" fill="#B07A4A" cx="34" cy="26" r="11"/><circle class="k" fill="#B07A4A" cx="86" cy="26" r="11"/>
 <circle class="k" fill="#C48B57" cx="60" cy="48" r="32"/>
 <ellipse class="k" fill="#EBC79C" cx="60" cy="60" rx="15" ry="12"/>
-<path class="k" fill="{INK}" d="M54 54 h12 l-6 6z"/><path class="k" fill="none" d="M60 60 v5 q-5 4 -9 0 M60 65 q5 4 9 0"/>{}{}{}{}
-<g class="paw"><path class="k" fill="#C48B57" d="M28 78 q-14 10 -6 26 l10 -2 q-2 -10 6 -16z"/><path class="k" fill="none" stroke-width="4" d="M24 100 L6 116"/></g>
-<g class="paw p2"><path class="k" fill="#C48B57" d="M92 78 q14 10 6 26 l-10 -2 q2 -10 -6 -16z"/><path class="k" fill="none" stroke-width="4" d="M96 100 L114 116"/></g></g>"##,
+<path class="k" fill="{INK}" d="M54 54 h12 l-6 6z"/><path class="k" fill="none" d="M60 60 v5 q-5 4 -9 0 M60 65 q5 4 9 0"/>{}{}{}{}</g>"##,
         eye(49.0, 42.0, 3.6),
         eye(71.0, 42.0, 3.6),
         cheek(41.0, 56.0),
@@ -267,7 +280,13 @@ pub const NOTE: &str = r##"<svg viewBox="0 0 30 40" aria-hidden="true"><path cla
 /// The two pictures of a two-choice game.
 pub fn duo(slug: &str) -> (String, String) {
     match slug {
-        "birdfish" => (svg(&bird()), svg(&fish())),
+        "birdfish" => (
+            svg_moving(
+                &bird_with(""),
+                &format!(r#"<g filter="url(#wob)">{WING}</g>"#),
+            ),
+            svg(&fish()),
+        ),
         "twins" => (
             svg(&format!(
                 r#"<g transform="translate(-4 14) scale(.62)">{0}</g><g transform="translate(50 14) scale(.62)">{0}</g>"#,
@@ -292,8 +311,13 @@ pub fn duo(slug: &str) -> (String, String) {
     }
 }
 
+/// The bear's paws drum on every beat, so they move outside the face's
+/// filter (see [`svg_moving`]).
+const PAWS: &str = r##"<g class="paw"><g filter="url(#wob)"><path class="k" fill="#C48B57" d="M28 78 q-14 10 -6 26 l10 -2 q-2 -10 6 -16z"/><path class="k" fill="none" stroke-width="4" d="M24 100 L6 116"/></g></g>
+<g class="paw p2"><g filter="url(#wob)"><path class="k" fill="#C48B57" d="M92 78 q14 10 6 26 l-10 -2 q2 -10 -6 -16z"/><path class="k" fill="none" stroke-width="4" d="M96 100 L114 116"/></g></g>"##;
+
 pub fn bear_svg() -> String {
-    svg(&bear())
+    svg_moving(&bear(), PAWS)
 }
 
 pub fn drum_svg() -> String {
@@ -338,8 +362,9 @@ pub fn tile(slug: &str) -> String {
             bell()
         )),
         "drum" => svg(&format!(
-            r#"<g transform="translate(22 0) scale(.62)">{}</g><g transform="translate(14 58) scale(.78)">{}</g>"#,
+            r#"<g transform="translate(22 0) scale(.62)">{}{}</g><g transform="translate(14 58) scale(.78)">{}</g>"#,
             bear(),
+            PAWS.replace(r#"<g filter="url(#wob)">"#, "<g>"),
             drum()
         )),
         "tempo" => svg(&format!(

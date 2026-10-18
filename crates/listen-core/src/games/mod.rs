@@ -73,7 +73,16 @@ pub trait Game: Sync {
     fn beat(&self) -> bool {
         false
     }
+    /// A right answer replays the question as its confirmation, onsets
+    /// this many times closer (None: no replay). 1.0 where the timing is
+    /// itself the answer.
+    fn confirm_speed(&self) -> Option<f32> {
+        None
+    }
 }
+
+/// How much faster a right answer's confirmation replays the question.
+pub const CONFIRM_SPEED: f32 = 1.25;
 
 /// Home-screen order.
 pub static ALL: &[&dyn Game] = &[
@@ -132,6 +141,14 @@ impl Game for Duo {
     }
     fn hint(&self) -> Sound {
         (self.hint)()
+    }
+    fn confirm_speed(&self) -> Option<f32> {
+        // Turtle or Rabbit: the tempo is the answer, so it replays as asked.
+        Some(if self.slug == "tempo" {
+            1.0
+        } else {
+            CONFIRM_SPEED
+        })
     }
 }
 

@@ -3,6 +3,7 @@
 
 use crate::art;
 use listen_core::music::SCALE;
+use listen_core::settings::NOTES_AT_ONCE;
 use listen_core::{Age, Game, Settings, ALL};
 
 /// Target ids in `data-t`: answers use their game ids (0..), these are
@@ -85,7 +86,7 @@ pub fn game(g: &dyn Game, targets: &[u8]) -> String {
             format!(r#"<div class="duo who n{}">{picks}</div>"#, targets.len())
         }
         "drum" => format!(
-            r#"<div class="drumming"><div class="beads" id="beads"></div><div class="bear-wrap" data-t="1" aria-hidden="true">{}</div><button class="pick pad toy" data-t="0" aria-label="Drum">{}</button></div>"#,
+            r#"<div class="drumming"><div class="streak" id="streak" aria-live="off"></div><div class="bear-wrap" data-t="1" aria-hidden="true">{}</div><button class="pick pad toy" data-t="0" aria-label="Drum">{}</button></div>"#,
             art::bear_svg(),
             art::drum_svg()
         ),
@@ -168,17 +169,9 @@ pub fn xylo(targets: &[u8]) -> String {
     )
 }
 
-/// Drum along: one bead per drum still to count.
-pub fn drum_beads(goal: usize, done: usize) -> String {
-    (0..goal)
-        .map(|i| {
-            if i < done {
-                r#"<i class="bead on" style="--cb:var(--do)"></i>"#
-            } else {
-                r#"<i class="bead"></i>"#
-            }
-        })
-        .collect()
+/// Drum along's streak: a star and the number of on-beat drums in a row.
+pub fn streak(n: u32) -> String {
+    format!(r#"{}<b>{n}</b>"#, art::STAR)
 }
 
 pub fn beads(answer: &[u8], done: usize) -> String {
@@ -294,6 +287,23 @@ fn game_panel(s: &Settings, i: usize) -> String {
             &format!("t:{i}:replay"),
             &["Never", "1 miss", "2 misses", "3 misses"],
             idx(&COUNTS, t.replay),
+        ));
+    }
+    if g.slug() == "play" {
+        let labels: Vec<String> = NOTES_AT_ONCE.iter().map(|n| n.to_string()).collect();
+        let labels: Vec<&str> = labels.iter().map(|l| l.as_str()).collect();
+        body.push_str(&row(
+            "Notes at once",
+            "chord",
+            &labels,
+            idx(&NOTES_AT_ONCE, s.notes_at_once),
+        ));
+    }
+    if g.slug() == "drum" {
+        body.push_str(&tog(
+            "tog:streak",
+            "Count beats in a row (a miss just starts again)",
+            s.streak,
         ));
     }
     if s.custom(i) {

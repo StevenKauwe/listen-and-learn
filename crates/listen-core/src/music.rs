@@ -157,6 +157,39 @@ impl Sound {
         self
     }
 
+    /// The question replayed as a right answer's confirmation: onsets
+    /// `speed` times closer (tone lengths, pitches and gains kept), only
+    /// the tones that start within `cap` seconds, every one lighting
+    /// `target`.
+    pub fn confirm(&self, speed: f32, cap: f32, target: u8) -> Sound {
+        let speed = speed.max(1.0);
+        let tones: Vec<Tone> = self
+            .tones
+            .iter()
+            .map(|t| Tone {
+                at: t.at / speed,
+                light: Some(target),
+                ..*t
+            })
+            .enumerate()
+            .filter(|(i, t)| *i == 0 || t.at < cap)
+            .map(|(_, t)| t)
+            .collect();
+        Sound::of(tones)
+    }
+
+    /// Append `other`, starting `at` seconds into this sound.
+    pub fn then(mut self, other: &Sound, at: f32) -> Self {
+        for t in &other.tones {
+            self.tones.push(Tone {
+                at: t.at + at,
+                ..*t
+            });
+        }
+        self.dur = self.dur.max(at + other.dur);
+        self
+    }
+
     /// Append the sung name of `degree` at MIDI `midi`, starting at `at`.
     pub fn with_name(mut self, degree: u8, midi: u8, at: f32) -> Self {
         let t = Tone::bar(midi, at, SUNG_LEN).voiced(Voice::Sing(degree % 7));

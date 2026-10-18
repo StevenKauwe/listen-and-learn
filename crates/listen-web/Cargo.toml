@@ -20,7 +20,7 @@ features = [
   "Window", "Document", "Element", "HtmlElement", "HtmlInputElement", "Node", "NodeList",
   "Event", "EventTarget", "PointerEvent", "MouseEvent", "KeyboardEvent", "AddEventListenerOptions",
   "Location", "Storage", "DomTokenList", "DomRect", "Navigator", "Performance", "MediaQueryList",
-  "AudioContext", "AudioContextState", "BaseAudioContext", "AudioNode", "AudioParam", "GainNode",
+  "AudioContext", "AudioContextOptions", "AudioContextState", "BaseAudioContext", "AudioNode", "AudioParam", "GainNode",
   "OscillatorNode", "AudioScheduledSourceNode", "BiquadFilterNode", "BiquadFilterType",
   "DynamicsCompressorNode", "AudioDestinationNode", "AudioBuffer", "AudioBufferSourceNode",
   "HtmlAudioElement", "HtmlMediaElement",

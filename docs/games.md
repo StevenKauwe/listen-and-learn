@@ -24,6 +24,16 @@ names it ("Mi!") and, with names on, the name is sung on that pitch.
 - Rows: every question is in the rung's set; question and answer sound
   identical for the right bar; the sung name is at the note's MIDI pitch.
 
+## Right answers in the comparison games
+
+Bird or Fish, Same or Different, Up or Down, Turtle or Rabbit, Mouse or
+Elephant and Who's singing? confirm a right answer by playing the
+question once more with the chosen picture lighting on each note (the
+walker climbs or descends over the replay), then the chime. Onsets are
+1.25× closer except in Turtle or Rabbit, whose tempo is the answer;
+pitch and loudness never change. Only the tones starting in the first
+1.6 s replay, so the celebration stays short.
+
 ## Bird or Fish (`#birdfish`)
 
 High or low. The bird flies in the sky (top), the fish swims in the water
@@ -94,20 +104,31 @@ are identical whoever plays.
 ## Drum along (`#drum`)
 
 A bear drums a steady beat; the child drums on a big drum, which sounds
-at contact. Listen starts the bear; beads fill as drums count.
+at contact with every finger (two hands drum freely). Listen starts the
+bear, and it drums on for as long as the child does: no goal, no end of
+set, no reset. After 30 s with no drum it rests until Listen.
 
-| Rung | Beat | Counts when | Lead-in | Goal | Bear plays |
-|---|---|---|---|---|---|
-| 0 | 0.5 s | every drum | 4 | 8 | 16 beats |
-| 1 | 0.6 s | within ±25 % of a beat | 4 | 8 | 24 |
-| 2 | 0.5 s | within ±18 % of a beat | 4 | 10 | 28 |
+Streak (adult toggle; off at 2–3, on at 4 and 5+): a star and the number
+of drums in a row that landed on the beat. A drum between beats only
+fades the number away; no sound, no wiggle, nothing wrong.
 
-- Drums closer than 0.15 s count once. On judged rungs each beat counts
-  once and the lead-in never counts. Nothing is ever wrong: the bear
-  rests at the end and Listen starts again.
+| Rung | Beat | Streak counts within | Lead-in |
+|---|---|---|---|
+| 0 | 0.5 s | ±30 % of a beat (±150 ms) | 4 |
+| 1 | 0.6 s | ±25 % (±150 ms) | 4 |
+| 2 | 0.5 s | ±18 % (±90 ms) | 4 |
+
+- A drum is judged at the time it was touched against the beat as
+  heard: the audio clock less the output latency (`getOutputTimestamp`
+  where available, else `baseLatency + outputLatency`), so speaker and
+  Bluetooth delay never skew it.
+- Each beat counts once; the lead-in never counts; a skipped beat
+  starts the streak again at 1; drums closer than 0.15 s count once.
+  Every 8 in a row, a few stars.
 
 ## Free play (`#play`)
 
-A xylophone with no questions and no wrong answers. Bars sound at contact
-(the one exception to judging on release); a note floats up from each.
-Rungs: six bars (Do Re Mi Sol La Do, pentatonic), eight bars.
+A xylophone with no questions and no wrong answers. Bars sound at contact;
+a note floats up from each. Several fingers play at once, up to "notes at
+once" (default 5; 1 · 2 · 3 · 5 · 10). Rungs: six bars (Do Re Mi Sol La
+Do, pentatonic), eight bars.

@@ -8,7 +8,9 @@ for the home screen and every game: no page errors, no scrolling, every
 target inside the viewport in portrait and landscape; then plays each game
 through one wrong and one right answer with real PointerEvent sequences.
 Also: a 100 px swipe never answers, a tap while the question plays never
-answers, a second finger is ignored. Exit 0 iff every row passes.
+answers, a second finger is ignored in answer games; Free play sounds up to
+five fingers at once and releases each alone; Drum along drums on with no
+end and counts an on-beat streak at 4+ only. Exit 0 iff every row passes.
 """
 
 import functools
@@ -224,21 +226,10 @@ def play_game(slug):
         tap('#stage [data-t="0"]')
         pump(0.2)
         check(int(attr("guesses") or 0) == before + 1, "play: a bar sounds at contact (one per touch)")
+        play_fingers()
         return
     if slug == "drum":
-        before = int(attr("guesses") or 0)
-        tap('#stage [data-t="0"]')
-        pump(0.2)
-        check(int(attr("guesses") or 0) == before + 1, "drum: the drum sounds at contact before the bear starts")
-        tap("#listen")
-        check(wait_for("document.body.dataset.phase === 'drumming'", 3), "drum: Listen starts the bear drumming")
-        pump(0.6)
-        check(js("!!document.querySelector('.bear-wrap.lit') || true"), "drum: bear drums")
-        tap('#stage [data-t="0"]')
-        pump(0.2)
-        check(js("document.querySelectorAll('#beads .bead.on').length") == 0,
-              "drum (age 5+): a drum during the bear's lead-in does not count")
-        check(wait_for("document.body.dataset.phase === 'ready'", 14), "drum: the bear rests at the end")
+        drum_rows()
         return
     check(attr("phase") == "ready", f"{slug}: starts ready")
     first = '#stage [data-t="0"]'
@@ -279,6 +270,91 @@ def play_game(slug):
     check(wait_for("document.body.dataset.phase === 'question'", 4), f"{slug}: next round starts by itself")
 
 
+DOWN = "[...document.querySelectorAll('#stage .row.down')].map(e => +e.dataset.t)"
+
+
+def play_fingers():
+    """Free play: several fingers at once (default 5), each released alone."""
+    before = int(attr("guesses") or 0)
+    for pid, t in enumerate([0, 2, 4], start=11):
+        ptr("pointerdown", f'#stage [data-t="{t}"]', pid=pid)
+    pump(0.05)
+    check(int(attr("guesses") or 0) == before + 3, "play: three fingers sound three bars at once")
+    check(sorted(js(DOWN)) == [0, 2, 4], f"play: all three bars held down ({js(DOWN)})")
+    ptr("pointerup", '#stage [data-t="2"]', pid=12)
+    pump(0.05)
+    check(sorted(js(DOWN)) == [0, 4], "play: lifting one finger releases only its bar")
+    ptr("pointercancel", '#stage [data-t="0"]', pid=11)
+    pump(0.05)
+    check(js(DOWN) == [4], "play: a cancelled finger releases only its bar")
+    ptr("pointerup", '#stage [data-t="4"]', pid=13)
+    pump(0.05)
+    check(js(DOWN) == [], "play: nothing stuck after every finger lifts")
+    # Past the limit: six fingers, five sound.
+    before = int(attr("guesses") or 0)
+    for pid in range(21, 27):
+        ptr("pointerdown", f'#stage [data-t="{pid - 21}"]', pid=pid)
+    pump(0.05)
+    check(int(attr("guesses") or 0) == before + 5, "play: five notes at once by default, a sixth finger waits")
+    for pid in range(21, 27):
+        ptr("pointerup", f'#stage [data-t="{pid - 21}"]', pid=pid)
+    pump(0.05)
+    check(js(DOWN) == [], "play: all released")
+
+
+# Drum on the bear's beat: tap the moment the bear's paws drum (the lit
+# class follows the audio clock), optionally offset by `late` seconds.
+DRUM_ON_BEAT = """(() => {
+  window.__drumObs && window.__drumObs.disconnect();
+  const bear = document.querySelector('.bear-wrap'), pad = document.querySelector('#stage [data-t="0"]');
+  const hit = (pid) => { const r = pad.getBoundingClientRect();
+    const o = { bubbles: true, cancelable: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+      pointerId: pid, pointerType: "touch", isPrimary: true, button: 0, buttons: 1 };
+    pad.dispatchEvent(new PointerEvent("pointerdown", o)); pad.dispatchEvent(new PointerEvent("pointerup", o)); };
+  let pid = 100;
+  window.__drumObs = new MutationObserver(() => {
+    if (bear.classList.contains('lit') && window.__drumLate != null) setTimeout(() => hit(pid++), window.__drumLate * 1000);
+  });
+  window.__drumObs.observe(bear, { attributes: true, attributeFilter: ['class'] });
+  return true;
+})()"""
+
+
+def drum_rows():
+    """Age 5+ (BY_EAR): the streak is on by default."""
+    before = int(attr("guesses") or 0)
+    tap('#stage [data-t="0"]')
+    pump(0.2)
+    check(int(attr("guesses") or 0) == before + 1, "drum: the drum sounds at contact before the bear starts")
+    tap("#listen")
+    check(wait_for("document.body.dataset.phase === 'drumming'", 3), "drum: Listen starts the bear drumming")
+    # Two hands: a second finger while the first rests still drums.
+    before = int(attr("guesses") or 0)
+    ptr("pointerdown", '#stage [data-t="0"]', pid=31)
+    pump(0.2)
+    ptr("pointerdown", '#stage [data-t="0"]', pid=32)
+    pump(0.05)
+    ptr("pointerup", '#stage [data-t="0"]', pid=31)
+    ptr("pointerup", '#stage [data-t="0"]', pid=32)
+    check(int(attr("guesses") or 0) == before + 2, "drum: a second hand drums while the first rests")
+    js(DRUM_ON_BEAT)
+    js("(window.__drumLate = 0, true)")
+    pump(6.0)
+    streak = int(attr("streak") or 0)
+    check(streak >= 5, f"drum (age 5+): drums on the beat build a streak ({streak})")
+    check(js("document.getElementById('streak').classList.contains('on')"), "drum: the streak shows")
+    shot("drum-streak")
+    wrong = attr("wrong")
+    js("(window.__drumLate = 0.24, true)")  # half a beat late
+    pump(1.2)
+    check(attr("streak") == "0", f"drum: an off-beat drum restarts the streak ({attr('streak')})")
+    check(attr("phase") == "drumming" and attr("wrong") == wrong and attr("set") is None, "drum: a miss is not an error; the bear drums on")
+    js("(window.__drumLate = 0, true)")
+    pump(10.0)  # past where the old 28-beat set would have ended
+    check(attr("phase") == "drumming", "drum: no reset, the bear keeps drumming while the child drums")
+    js("(window.__drumLate = null, window.__drumObs.disconnect(), true)")
+
+
 def age_two_rows():
     """Default settings (age 2): the first rounds show the answer and the
     other choices cannot be wrong."""
@@ -314,11 +390,13 @@ def age_two_rows():
     tap("#listen")
     check(wait_for("document.body.dataset.phase === 'drumming'", 3), "age 2: the bear drums")
     pump(0.5)
+    hits = int(attr("hits") or 0)
     for _ in range(3):
         tap('#stage [data-t="0"]')
         pump(0.3)
-    on = js("document.querySelectorAll('#beads .bead.on').length")
-    check(on == 3, f"age 2: every drum counts ({on})")
+    check(int(attr("hits") or 0) == hits + 3, "age 2: every drum sounds")
+    check(not js("document.getElementById('streak').classList.contains('on')"),
+          "age 2: no streak, nothing counted, nothing wrong")
     shot("age2-drum")
     js(f"(localStorage.setItem('{STORE}', '{BY_EAR}'), true)")
 
