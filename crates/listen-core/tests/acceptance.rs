@@ -3,8 +3,19 @@
 
 use listen_core::*;
 
+/// A by-ear configuration (age 4 bands, no help), so wrong answers count.
 fn cfg(game: usize) -> RoundCfg {
-    Settings::default().round_cfg(game)
+    let mut s = Settings::default();
+    s.set_age(Age::Four);
+    let mut c = s.round_cfg(game);
+    c.tune.show = 0;
+    c.tune.light = false;
+    c.tune.glow_wait = 0;
+    c.tune.glow_miss = 0;
+    c.tune.replay = 2;
+    c.tune.hi = c.tune.lo;
+    c.set_len = 0;
+    c
 }
 
 fn wait_seq(fx: &[Effect]) -> Option<u32> {
@@ -24,16 +35,16 @@ fn hear(r: &mut Round) {
 
 fn wrong_target(r: &Round) -> u8 {
     let t = r.q.answer[r.step];
-    *r.game
-        .targets(r.cfg.knobs.level)
-        .iter()
-        .find(|&&x| x != t)
-        .unwrap()
+    *r.targets().iter().find(|&&x| x != t).unwrap()
 }
 
 #[test]
 fn every_game_plays_one_wrong_then_one_right_and_moves_on() {
-    for (i, g) in ALL.iter().enumerate().filter(|(_, g)| !g.free()) {
+    for (i, g) in ALL
+        .iter()
+        .enumerate()
+        .filter(|(_, g)| !g.free() && !g.beat())
+    {
         let mut r = Round::new(*g, cfg(i), 42);
         hear(&mut r);
         let before = r.q.clone();
@@ -179,18 +190,19 @@ fn echo_tracks_progress_and_a_slip_starts_over() {
     hear(&mut r);
     let first = r.q.answer[0];
     let fx = r.handle(Event::Answer(first));
-    assert!(fx.contains(&Effect::Progress { done: 1, total: 2 }));
+    let total = r.q.answer.len();
+    assert!(fx.contains(&Effect::Progress { done: 1, total }));
     assert_eq!(r.phase, Phase::Awaiting);
     r.handle(Event::Answer(wrong_target(&r)));
     assert_eq!((r.phase, r.step), (Phase::Wrong, 0));
 }
 
 #[test]
-fn assist_glow_after_three_misses_only_when_enabled() {
+fn glow_after_three_misses_only_when_enabled() {
     for assist in [false, true] {
         let mut c = cfg(0);
-        c.assist = assist;
-        c.replay_after = 0;
+        c.tune.glow_miss = if assist { 3 } else { 0 };
+        c.tune.replay = 0;
         let mut r = Round::new(ALL[0], c, 1);
         hear(&mut r);
         let mut last = vec![];
@@ -200,6 +212,34 @@ fn assist_glow_after_three_misses_only_when_enabled() {
         }
         let glow = last.iter().any(|e| matches!(e, Effect::Hint(Some(_))));
         assert_eq!(glow, assist);
+    }
+}
+
+#[test]
+fn age_two_default_first_round_of_every_game_is_errorless() {
+    let s = Settings::default();
+    assert_eq!(s.age, Age::Two);
+    for (i, g) in ALL
+        .iter()
+        .enumerate()
+        .filter(|(_, g)| !g.free() && !g.beat())
+    {
+        let mut r = Round::new(*g, s.round_cfg(i), 7);
+        assert!(r.targets().len() <= 2, "{}", g.slug());
+        let fx = r.handle(Event::Listen);
+        let fx = r.handle(Event::Timer(wait_seq(&fx).unwrap()));
+        assert!(
+            fx.contains(&Effect::Hint(Some(r.q.answer[0]))),
+            "{}",
+            g.slug()
+        );
+        let other = *r.targets().iter().find(|&&t| t != r.q.answer[0]).unwrap();
+        r.handle(Event::Answer(other));
+        assert_eq!((r.wrongs, r.phase), (0, Phase::Awaiting), "{}", g.slug());
+        for &a in &r.q.answer.clone() {
+            r.handle(Event::Answer(a));
+        }
+        assert_eq!(r.phase, Phase::Right, "{}", g.slug());
     }
 }
 

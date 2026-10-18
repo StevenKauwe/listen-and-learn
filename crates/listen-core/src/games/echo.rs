@@ -1,5 +1,6 @@
-//! Echo: copy a short pattern on the bars. Easy levels light the bars as
-//! they play; harder levels are by ear only.
+//! Echo: copy a short pattern on the bars, Simon-style. With help on, the
+//! bars light as they play; by ear otherwise. The ladder starts with the
+//! sol–mi call every child already knows from playground chants.
 
 use super::{Game, Knobs, Question};
 use crate::music::{Sound, Tone, SCALE};
@@ -7,32 +8,31 @@ use crate::rng::Rng;
 
 pub struct Echo;
 
-struct Level {
-    set: &'static [u8],
-    len: usize,
-    lights: bool,
+pub struct Level {
+    pub set: &'static [u8],
+    pub len: usize,
 }
 
-const LEVELS: [Level; 4] = [
+pub const LEVELS: [Level; 5] = [
     Level {
-        set: &[0, 2, 4],
+        set: &[2, 4],
         len: 2,
-        lights: true,
     },
     Level {
-        set: &[0, 2, 4],
+        set: &[2, 4, 5],
+        len: 2,
+    },
+    Level {
+        set: &[2, 4, 5],
         len: 3,
-        lights: true,
     },
     Level {
-        set: &[0, 2, 4],
+        set: &[0, 2, 4, 5],
         len: 3,
-        lights: false,
     },
     Level {
-        set: &[0, 1, 2, 3, 4],
+        set: &[0, 1, 2, 4, 5],
         len: 4,
-        lights: false,
     },
 ];
 
@@ -40,8 +40,8 @@ const LEVELS: [Level; 4] = [
 pub const STEP: f32 = 0.55;
 const NOTE: f32 = 0.6;
 
-fn lv(level: u8) -> &'static Level {
-    &LEVELS[(level as usize).min(LEVELS.len() - 1)]
+fn lv(step: u8) -> &'static Level {
+    &LEVELS[(step as usize).min(LEVELS.len() - 1)]
 }
 
 impl Game for Echo {
@@ -51,19 +51,23 @@ impl Game for Echo {
     fn title(&self) -> &'static str {
         "Echo"
     }
-    fn levels(&self) -> &'static [&'static str] {
+    fn steps(&self) -> &'static [&'static str] {
         &[
-            "Two notes, lights",
-            "Three notes, lights",
-            "Three notes, by ear",
-            "Four notes, by ear",
+            "Sol Mi, 2 notes",
+            "Sol Mi La, 2 notes",
+            "Sol Mi La, 3 notes",
+            "Do Mi Sol La, 3 notes",
+            "Do Re Mi Sol La, 4 notes",
         ]
     }
-    fn targets(&self, level: u8) -> Vec<u8> {
-        lv(level).set.to_vec()
+    fn targets(&self, step: u8) -> Vec<u8> {
+        lv(step).set.to_vec()
     }
     fn question(&self, k: Knobs, rng: &mut Rng, prev: Option<&Question>) -> Question {
         let l = lv(k.level);
+        // With two bars there are only two patterns; allow repeats there
+        // so the answer is not simply "the other one".
+        let avoid_repeat = l.set.len() > 2;
         loop {
             let mut pat: Vec<u8> = Vec::with_capacity(l.len);
             while pat.len() < l.len {
@@ -72,24 +76,17 @@ impl Game for Echo {
                     pat.push(d);
                 }
             }
-            if prev.map(|p| p.answer != pat).unwrap_or(true) {
+            if !avoid_repeat || prev.map(|p| p.answer != pat).unwrap_or(true) {
                 let tones = pat
                     .iter()
                     .enumerate()
-                    .map(|(i, &d)| {
-                        let t = Tone::bar(SCALE[d as usize].midi, i as f32 * STEP, NOTE);
-                        if l.lights {
-                            t.lit(d)
-                        } else {
-                            t
-                        }
-                    })
+                    .map(|(i, &d)| Tone::bar(SCALE[d as usize].midi, i as f32 * STEP, NOTE).lit(d))
                     .collect();
                 return Question {
                     answer: pat,
                     sound: Sound::of(tones),
                     name: None,
-                    say: None,
+                    sing: None,
                 };
             }
         }
@@ -103,10 +100,10 @@ impl Game for Echo {
     }
     fn hint(&self) -> Sound {
         Sound::of(vec![
-            Tone::bar(60, 0.0, 0.4),
-            Tone::bar(67, 0.22, 0.5),
-            Tone::bar(60, 0.7, 0.4).gain(0.5),
-            Tone::bar(67, 0.92, 0.5).gain(0.5),
+            Tone::bar(67, 0.0, 0.4),
+            Tone::bar(64, 0.25, 0.5),
+            Tone::bar(67, 0.75, 0.4).gain(0.5),
+            Tone::bar(64, 1.0, 0.5).gain(0.5),
         ])
     }
 }
@@ -116,21 +113,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn patterns_have_the_level_length_and_no_stutters() {
+    fn patterns_have_the_step_length_no_stutters_and_light_each_note() {
         let mut rng = Rng::new(11);
-        for level in 0..4u8 {
+        for step in 0..LEVELS.len() as u8 {
             let q = Echo.question(
                 Knobs {
-                    level,
+                    level: step,
                     note_len: 1.2,
                 },
                 &mut rng,
                 None,
             );
-            assert_eq!(q.answer.len(), LEVELS[level as usize].len);
+            assert_eq!(q.answer.len(), LEVELS[step as usize].len);
             assert!(q.answer.windows(2).all(|w| w[0] != w[1]));
-            let lit = q.sound.tones.iter().all(|t| t.light.is_some());
-            assert_eq!(lit, LEVELS[level as usize].lights);
+            for (t, a) in q.sound.tones.iter().zip(&q.answer) {
+                assert_eq!(t.light, Some(*a));
+            }
         }
     }
 }

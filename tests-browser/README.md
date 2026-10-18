@@ -22,5 +22,5 @@ every game can be played through. Real nodes are still created. Sound
 itself is checked by ear on a phone.
 
 The page exposes `data-route`, `data-phase`, `data-retry`, `data-audio`,
-`data-guesses`, `data-right`, `data-wrong`, `data-answer` and
-`data-errors` on `<body>` for the harness. None of them is rendered.
+`data-guesses`, `data-right`, `data-wrong`, `data-answer`, `data-hits`
+(Drum along) and `data-errors` on `<body>` for the harness. None of them is rendered.

@@ -4,8 +4,10 @@
 //! before the volume, so loudness is even and nothing clips.
 
 use listen_core::music::{freq, Sound, Tone, Voice};
+use listen_core::voice;
+use std::collections::HashMap;
 use wasm_bindgen::JsValue;
-use web_sys::{AudioContext, AudioContextState, BiquadFilterType, GainNode};
+use web_sys::{AudioBuffer, AudioContext, AudioContextState, BiquadFilterType, GainNode};
 
 pub struct Audio {
     pub ctx: AudioContext,
@@ -14,6 +16,9 @@ pub struct Audio {
     voices: Vec<(GainNode, f64)>,
     primed: bool,
     unmuted: bool,
+    /// Sung syllables rendered by the core singer, keyed by
+    /// (syllable, MIDI note, length in ms).
+    sung: HashMap<(u8, u32, u32), AudioBuffer>,
 }
 
 /// iPhones mute Web Audio when the ring/silent switch is on, unlike media
@@ -123,6 +128,7 @@ impl Audio {
             voices: vec![],
             primed: false,
             unmuted: false,
+            sung: HashMap::new(),
         })
     }
 
@@ -189,7 +195,69 @@ impl Audio {
         t0
     }
 
+    /// A sung syllable: rendered once by the core's formant singer at the
+    /// tone's exact pitch, then played from a buffer.
+    fn sing(&mut self, syl: u8, t: &Tone, at: f64) -> Result<(), JsValue> {
+        let key = (syl, (t.midi * 100.0) as u32, (t.dur * 1000.0) as u32);
+        if !self.sung.contains_key(&key) {
+            let sr = self.ctx.sample_rate();
+            let s = voice::SYLLABLES[(syl as usize).min(6)];
+            let pcm = voice::render(s, t.midi, t.dur, sr);
+            let buf = self.ctx.create_buffer(1, pcm.len() as u32, sr)?;
+            buf.copy_to_channel(&pcm, 0)?;
+            self.sung.insert(key, buf);
+        }
+        let buf = &self.sung[&key];
+        let src = self.ctx.create_buffer_source()?;
+        src.set_buffer(Some(buf));
+        let g = self.ctx.create_gain()?;
+        // Peak about 0.38, near the bar's 0.3 peak (sustained, so a little more).
+        g.gain().set_value(0.42 * t.gain);
+        src.connect_with_audio_node(&g)?;
+        g.connect_with_audio_node(&self.bus)?;
+        src.start_with_when(at)?;
+        self.voices.push((g, at + buf.duration()));
+        Ok(())
+    }
+
+    /// A small hand drum: a sine whose pitch drops fast, plus a soft tap.
+    fn drum(&mut self, t: &Tone, at: f64) -> Result<(), JsValue> {
+        let ctx = &self.ctx;
+        let f = freq(t.midi);
+        let end = at + 0.4;
+        let osc = ctx.create_oscillator()?;
+        osc.frequency().set_value_at_time(f * 2.2, at)?;
+        osc.frequency()
+            .exponential_ramp_to_value_at_time(f, at + 0.06)?;
+        let env = ctx.create_gain()?;
+        let g = env.gain();
+        let peak = 0.55 * t.gain;
+        g.set_value_at_time(0.0, at)?;
+        g.linear_ramp_to_value_at_time(peak, at + 0.004)?;
+        g.set_target_at_time(0.0, at + 0.004, 0.07)?;
+        osc.connect_with_audio_node(&env)?;
+        env.connect_with_audio_node(&self.bus)?;
+        osc.start_with_when(at)?;
+        osc.stop_with_when(end)?;
+        let tap = ctx.create_oscillator()?;
+        tap.frequency().set_value(f * 7.3);
+        let tg = ctx.create_gain()?;
+        tg.gain().set_value_at_time(0.12 * t.gain, at)?;
+        tg.gain().set_target_at_time(0.0, at, 0.008)?;
+        tap.connect_with_audio_node(&tg)?;
+        tg.connect_with_audio_node(&self.bus)?;
+        tap.start_with_when(at)?;
+        tap.stop_with_when(at + 0.08)?;
+        self.voices.push((env, end));
+        Ok(())
+    }
+
     fn tone(&mut self, t: &Tone, at: f64) -> Result<(), JsValue> {
+        match t.voice {
+            Voice::Sing(syl) => return self.sing(syl, t, at),
+            Voice::Drum => return self.drum(t, at),
+            _ => {}
+        }
         let ctx = &self.ctx;
         let f = freq(t.midi);
         // Small speakers carry low notes poorly: lift them a little and
@@ -217,6 +285,10 @@ impl Audio {
                 ],
                 0.008,
             ),
+            // Held, breathy-soft, nearly pure: decay constants far longer
+            // than the note so it sustains until the release.
+            Voice::Flute => (&[(1.0, 1.0, 6.0), (2.0, 0.16, 5.0), (3.0, 0.05, 4.0)], 0.07),
+            Voice::Drum | Voice::Sing(_) => unreachable!(),
         };
         let dur = t.dur as f64;
         let end = at + dur + 0.35;

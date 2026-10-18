@@ -5,14 +5,16 @@
 use crate::music::Sound;
 use crate::rng::Rng;
 
-mod birdfish;
-mod echo;
-mod loud;
-mod notes;
-mod play;
-mod stairs;
-mod tempo;
-mod twins;
+pub mod birdfish;
+pub mod drum;
+pub mod echo;
+pub mod loud;
+pub mod notes;
+pub mod play;
+pub mod stairs;
+pub mod tempo;
+pub mod twins;
+pub mod who;
 
 /// What a round asks.
 #[derive(Clone, Debug, PartialEq)]
@@ -22,9 +24,10 @@ pub struct Question {
     pub answer: Vec<u8>,
     /// What plays when the child presses Listen.
     pub sound: Sound,
-    /// Shown and optionally spoken after a correct answer (Do Re Mi).
+    /// Shown after a correct answer (Do Re Mi).
     pub name: Option<&'static str>,
-    pub say: Option<&'static str>,
+    /// Sung after a correct answer when names are on: (degree, MIDI note).
+    pub sing: Option<(u8, u8)>,
 }
 
 impl Question {
@@ -33,7 +36,7 @@ impl Question {
             answer: vec![answer],
             sound,
             name: None,
-            say: None,
+            sing: None,
         }
     }
 }
@@ -41,6 +44,7 @@ impl Question {
 /// The adult-chosen settings a game reads when building a round.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Knobs {
+    /// The rung of the game's difficulty ladder.
     pub level: u8,
     /// Bar-note length in seconds (Do Re Mi, Echo, Free play).
     pub note_len: f32,
@@ -51,13 +55,10 @@ pub trait Game: Sync {
     fn slug(&self) -> &'static str;
     /// Adult-facing name in the settings sheet.
     fn title(&self) -> &'static str;
-    /// Level names, easiest first.
-    fn levels(&self) -> &'static [&'static str];
-    fn default_level(&self) -> u8 {
-        0
-    }
-    /// Answer targets on screen at this level (ids are game-specific).
-    fn targets(&self, level: u8) -> Vec<u8>;
+    /// The difficulty ladder, easiest first (calib.rs picks a band per age).
+    fn steps(&self) -> &'static [&'static str];
+    /// Answer targets on screen at this step (ids are game-specific).
+    fn targets(&self, step: u8) -> Vec<u8>;
     /// A new question. `prev` lets a game avoid immediate repeats.
     fn question(&self, k: Knobs, rng: &mut Rng, prev: Option<&Question>) -> Question;
     /// What touching `target` sounds like.
@@ -66,6 +67,10 @@ pub trait Game: Sync {
     fn hint(&self) -> Sound;
     /// Free play: no questions, targets sound at contact.
     fn free(&self) -> bool {
+        false
+    }
+    /// Drum along: a beat game with its own loop (games/drum.rs).
+    fn beat(&self) -> bool {
         false
     }
 }
@@ -79,6 +84,8 @@ pub static ALL: &[&dyn Game] = &[
     &echo::Echo,
     &tempo::TEMPO,
     &loud::LOUD,
+    &who::Who,
+    &drum::Drum,
     &play::Play,
 ];
 
@@ -94,9 +101,10 @@ pub fn by_slug(slug: &str) -> Option<(usize, &'static dyn Game)> {
 pub struct Duo {
     pub slug: &'static str,
     pub title: &'static str,
-    pub levels: &'static [&'static str],
-    /// Returns the right target (0/1) and the question sound.
-    pub ask: fn(level: u8, rng: &mut Rng) -> (u8, Sound),
+    pub steps: &'static [&'static str],
+    /// Returns the right target (0/1) and the question sound, whose tones
+    /// carry `light` = the right target (the help shows it).
+    pub ask: fn(step: u8, rng: &mut Rng) -> (u8, Sound),
     /// The sound each picture makes when touched.
     pub voices: [fn() -> Sound; 2],
     pub hint: fn() -> Sound,
@@ -109,10 +117,10 @@ impl Game for Duo {
     fn title(&self) -> &'static str {
         self.title
     }
-    fn levels(&self) -> &'static [&'static str] {
-        self.levels
+    fn steps(&self) -> &'static [&'static str] {
+        self.steps
     }
-    fn targets(&self, _level: u8) -> Vec<u8> {
+    fn targets(&self, _step: u8) -> Vec<u8> {
         vec![0, 1]
     }
     fn question(&self, k: Knobs, rng: &mut Rng, _prev: Option<&Question>) -> Question {
@@ -127,9 +135,12 @@ impl Game for Duo {
     }
 }
 
-/// Clamp a stored level to what a game offers.
-pub fn clamp_level(g: &dyn Game, level: u8) -> u8 {
-    level.min(g.levels().len().saturating_sub(1) as u8)
+/// Light every tone of a two-picture question with its answer.
+pub fn lit(answer: u8, mut s: Sound) -> Sound {
+    for t in s.tones.iter_mut() {
+        t.light = Some(answer);
+    }
+    s
 }
 
 #[cfg(test)]
@@ -145,8 +156,7 @@ mod tests {
                 g.slug()
             );
             assert!(ALL[i + 1..].iter().all(|o| o.slug() != g.slug()));
-            assert!(!g.levels().is_empty());
-            assert!((g.default_level() as usize) < g.levels().len());
+            assert!(!g.steps().is_empty());
         }
     }
 
@@ -154,7 +164,7 @@ mod tests {
     fn every_level_of_every_game_builds_sane_rounds() {
         let mut rng = Rng::new(7);
         for g in ALL {
-            for level in 0..g.levels().len() as u8 {
+            for level in 0..g.steps().len() as u8 {
                 let k = Knobs {
                     level,
                     note_len: 1.2,
@@ -164,7 +174,7 @@ mod tests {
                 let mut prev = None;
                 for _ in 0..50 {
                     let q = g.question(k, &mut rng, prev.as_ref());
-                    if !g.free() {
+                    if !g.free() && !g.beat() {
                         assert!(q.sound.dur > 0.2, "{} silent question", g.slug());
                         assert!(q.answer.iter().all(|a| targets.contains(a)));
                     }

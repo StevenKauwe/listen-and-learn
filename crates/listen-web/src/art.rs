@@ -177,6 +177,78 @@ fn parrot() -> String {
     )
 }
 
+/// A chick singing, with notes: the singer in Who's singing?
+pub fn singer() -> String {
+    format!(
+        r##"<g transform="translate(-6 8) scale(.9)">{}</g><path class="k" fill="#F28A2E" d="M48 70 h14 l-7 9z"/>
+<g class="notes"><path class="k" fill="#8C5BC8" d="M92 40 a5 4 0 1 1 -1 -1 V18 l12 -3 v7 l-11 3"/><path class="k" fill="#3E7FD6" d="M104 70 a4 3.4 0 1 1 -1 -1 V52 l9 -2 v6 l-8 2"/></g>"##,
+        chick()
+    )
+}
+
+/// A little xylophone with a mallet.
+pub fn xylophone() -> String {
+    let cols = ["#E5493A", "#F28A2E", "#F4C430", "#55AD4F", "#3E7FD6"];
+    let mut b = String::from(
+        r##"<path class="k" fill="#B98654" d="M10 50 L110 58 L110 64 L10 58Z M10 92 L110 86 L110 92 L10 98Z"/>"##,
+    );
+    for (i, c) in cols.iter().enumerate() {
+        let x = 16.0 + i as f32 * 19.0;
+        let h = 62.0 - i as f32 * 6.0;
+        let y = 75.0 - h / 2.0;
+        b.push_str(&format!(
+            r#"<rect class="k" fill="{c}" x="{x}" y="{y}" width="15" height="{h}" rx="6"/>"#
+        ));
+    }
+    b.push_str(
+        r##"<path class="k" fill="none" stroke-width="5" d="M70 30 L100 6"/><path fill="none" stroke="#C99460" stroke-width="2.5" stroke-linecap="round" d="M70 30 L100 6"/><circle class="k" fill="#F6B6C4" cx="68" cy="33" r="8"/>"##,
+    );
+    b
+}
+
+/// A golden hand bell.
+pub fn bell() -> String {
+    r##"<g class="bell"><rect class="k" fill="#B98654" x="53" y="10" width="14" height="22" rx="6"/>
+<path class="k" fill="#F4C430" d="M60 30 C38 30 34 52 32 78 L24 92 H96 L88 78 C86 52 82 30 60 30Z"/>
+<path fill="none" stroke="#FFF1B8" stroke-width="5" stroke-linecap="round" d="M44 50 q-4 12 -5 26"/>
+<circle class="k" fill="#E8A92E" cx="60" cy="100" r="8"/>
+<path class="k" fill="none" d="M100 50 q8 8 0 18 M108 42 q14 16 0 34"/></g>"##
+        .to_string()
+}
+
+/// A wooden flute with a few notes floating up.
+pub fn flute() -> String {
+    r##"<g class="flute"><rect class="k" fill="#D9A46A" x="8" y="64" width="104" height="16" rx="8" transform="rotate(-18 60 72)"/>
+<g fill="#7A4A26" transform="rotate(-18 60 72)"><ellipse cx="28" cy="72" rx="4" ry="3"/><circle cx="52" cy="72" r="3.4"/><circle cx="66" cy="72" r="3.4"/><circle cx="80" cy="72" r="3.4"/><circle cx="94" cy="72" r="3.4"/></g>
+<path class="k" fill="#55AD4F" d="M34 42 a5 4 0 1 1 -1 -1 V20 l12 -3 v7 l-11 3"/></g>"##
+        .to_string()
+}
+
+/// The bear who drums the beat.
+pub fn bear() -> String {
+    format!(
+        r##"<g class="bear"><circle class="k" fill="#B07A4A" cx="34" cy="26" r="11"/><circle class="k" fill="#B07A4A" cx="86" cy="26" r="11"/>
+<circle class="k" fill="#C48B57" cx="60" cy="48" r="32"/>
+<ellipse class="k" fill="#EBC79C" cx="60" cy="60" rx="15" ry="12"/>
+<path class="k" fill="{INK}" d="M54 54 h12 l-6 6z"/><path class="k" fill="none" d="M60 60 v5 q-5 4 -9 0 M60 65 q5 4 9 0"/>{}{}{}{}
+<g class="paw"><path class="k" fill="#C48B57" d="M28 78 q-14 10 -6 26 l10 -2 q-2 -10 6 -16z"/><path class="k" fill="none" stroke-width="4" d="M24 100 L6 116"/></g>
+<g class="paw p2"><path class="k" fill="#C48B57" d="M92 78 q14 10 6 26 l-10 -2 q2 -10 -6 -16z"/><path class="k" fill="none" stroke-width="4" d="M96 100 L114 116"/></g></g>"##,
+        eye(49.0, 42.0, 3.6),
+        eye(71.0, 42.0, 3.6),
+        cheek(41.0, 56.0),
+        cheek(79.0, 56.0)
+    )
+}
+
+/// The child's drum.
+pub fn drum() -> String {
+    r##"<g class="drumkit"><path class="k" fill="#E5493A" d="M14 44 V88 Q60 112 106 88 V44Z"/>
+<path class="k" fill="none" stroke="#FFF8EC" stroke-width="4" d="M20 50 L40 96 L60 54 L80 96 L100 50"/>
+<ellipse class="k" fill="#FFF3DE" cx="60" cy="44" rx="46" ry="16"/>
+<ellipse fill="none" stroke="#E8D6BA" stroke-width="3" cx="60" cy="44" rx="30" ry="9"/></g>"##
+        .to_string()
+}
+
 /// The question button's speaker.
 pub const SPEAKER: &str = r##"<svg class="spk" viewBox="0 0 100 100" aria-hidden="true"><path class="k" fill="#FFF8EC" d="M18 40 h15 l21 -17 v54 l-21 -17 h-15z"/><path class="k w w1" fill="none" d="M65 38 q8 12 0 24"/><path class="k w w2" fill="none" d="M76 29 q14 21 0 42"/></svg>"##;
 
@@ -220,6 +292,24 @@ pub fn duo(slug: &str) -> (String, String) {
     }
 }
 
+pub fn bear_svg() -> String {
+    svg(&bear())
+}
+
+pub fn drum_svg() -> String {
+    svg(&drum())
+}
+
+/// The pictures of Who's singing?, by target id.
+pub fn who(target: u8) -> String {
+    svg(&match target {
+        0 => singer(),
+        1 => xylophone(),
+        2 => bell(),
+        _ => flute(),
+    })
+}
+
 /// Home-tile picture for a game.
 pub fn tile(slug: &str) -> String {
     match slug {
@@ -242,6 +332,16 @@ pub fn tile(slug: &str) -> String {
         )),
         "stairs" => stairs(true),
         "echo" => svg(&parrot()),
+        "who" => svg(&format!(
+            r#"<g transform="translate(-4 4) scale(.62)">{}</g><g transform="translate(46 44) scale(.6)">{}</g>"#,
+            singer(),
+            bell()
+        )),
+        "drum" => svg(&format!(
+            r#"<g transform="translate(22 0) scale(.62)">{}</g><g transform="translate(14 58) scale(.78)">{}</g>"#,
+            bear(),
+            drum()
+        )),
         "tempo" => svg(&format!(
             r#"<g transform="translate(-6 40) scale(.6)">{}</g><g transform="translate(50 6) scale(.6)">{}</g>"#,
             turtle(),

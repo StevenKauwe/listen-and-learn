@@ -1,12 +1,13 @@
 # Listen & Learn: suite specification
 
 Source of truth for behaviour. Every game follows this file; per-game
-rules, levels and extra acceptance rows are in [games.md](games.md).
-Thresholds and tables are normative.
+rules, ladders and extra acceptance rows are in [games.md](games.md);
+the evidence behind games, ages and numbers is in
+[research.md](research.md). Thresholds and tables are normative.
 
 ## 1. Scope
 
-Ear-training games for children around ages 2–4, played on a phone held
+Ear-training games for children aged 2 to 5, played on a phone held
 imperfectly, iPhone Safari first. Each game is a toy: listen, then touch a
 big picture or bar. The interface adapts to an imprecise child, never the
 reverse. Resting fingers, slight drags, long presses, extra fingers and
@@ -60,16 +61,30 @@ Every question game runs the same machine (`listen-core::round`).
 
 - Answers are accepted only in Awaiting. No answer is ever accepted before
   the question has played once in full.
-- Wrong: a gentle wiggle, the same question stays, unlimited tries. After
-  every 2nd miss the question replays by itself.
+- Wrong: a gentle wiggle, the same question stays, unlimited tries. The
+  question replays by itself after the tune's "replay after" misses.
 - Right: a short celebration that never delays the next round; with
-  auto-next on, the next question plays by itself.
+  auto-next on, the next question plays by itself. After the set length
+  of rights (6 at age 2) the round rests with "All done!" and stars
+  until Listen is pressed.
+- Help, per question (`listen-core::calib`):
+  - **Shown** (the tune's first N right answers): the answer lights while
+    the question plays and glows when answers open; every other choice is
+    dimmed and, if touched, only makes its own sound. Nothing is wrong.
+  - **Lit**: the answer lights while the question plays.
+  - **By ear**: no light.
+  - A glow on the answer after the tune's misses, or after its wait in
+    seconds with no touch (delayed prompt). Two questions in a row that
+    each needed two misses bring back one shown answer.
+- Adaptive rung: three first-try rights step one rung harder, a question
+  needing two misses one rung easier, always within the tune's band and
+  never changing the targets on screen.
 - Waits carry a sequence number; a stale timer never advances a round.
 - Audio that fails to start or stops returns to Ready with a visible retry
   ("Tap again"); answers never open after an audio failure.
 - Page hidden or interrupted mid-round: audio stops, the round returns to
   Ready with the same question (or the next one, if it was just answered).
-- Two-picture games never give the same answer four times running.
+- Single-answer games never give the same answer four times running.
 
 ### 2.3 Audio
 
@@ -79,11 +94,12 @@ Web Audio synthesis only; no sample files.
 |---|---|
 | Tuning | equal temperament, A4 = 440 Hz; scale degrees from C4 |
 | Bar tone | sine fundamental plus gentle partials (2×, 3×, a marimba-like 3.98× and a faint 9.8× mallet tick), 26 ms attack, exponential decay over the note length |
-| Note length (Do Re Mi, Echo, Free play) | default 1.2 s, adult range 0.8–2.0 s |
+| Note length (Do Re Mi, Free play) | default 1.2 s, adult range 0.8–2.0 s |
 | Loudness | same voice and level for questions and answers; low notes lifted slightly and given more harmonics for phone speakers |
 | Bus | compressor (−10 dB, 5:1) then limiter (−2 dB, 20:1) then volume |
 | Reward chime | three soft high notes after the answer sound starts (adult toggle) |
-| Spoken note names | `speechSynthesis`, adult toggle, default off |
+| Sung note names | after a right Do Re Mi answer, sung on the note's own pitch by the Rust formant singer (`listen-core::voice`), 0.45 s after the bar; adult toggle, default on |
+| Other voices | sung "la", bell (chime), flute, hand drum |
 
 The audio context is created and resumed inside the first touch (iOS
 unlocks only from a gesture) and resumed again on every touch. A refused
@@ -118,7 +134,8 @@ stars; wrong answers wiggle. No flashing, no buzzers, no failure screens.
 - Home: one big picture tile per game, recognisable by picture and colour
   without reading. A tap plays the game's hint sound and opens it.
 - Each game is its own route: `#notes`, `#birdfish`, `#twins`, `#stairs`,
-  `#echo`, `#tempo`, `#loud`, `#play` (bare hash tokens). No hash = home.
+  `#echo`, `#tempo`, `#loud`, `#who`, `#drum`, `#play` (bare hash tokens).
+  No hash = home.
 - Back to home: hold the house button 1.5 s. A short tap shows "Hold".
 - Adult settings: hold the gear 2 s (home and every game). A short tap
   shows "Hold".
@@ -131,16 +148,25 @@ it starts the current game fresh with the new settings. Stored in
 `localStorage`; unreadable or blocked storage falls back to defaults, and
 every value is clamped.
 
+Simple panel:
+
 | Setting | Default | Range |
 |---|---|---|
-| Level, per game | see games.md | that game's levels |
+| Child's age | 2 | 2 · 3 · 4 · 5+; sets every game's tune and the set length |
 | Volume | 80 % | 0–100 % |
-| Note length | 1.2 s | 0.8–2.0 s |
-| Say note names | off | on/off |
+| Sing note names | on | on/off |
 | Reward chime | on | on/off |
-| Next round starts by itself | on | on/off |
-| Glow the answer after 3 tries | off | on/off |
+| More settings | | opens the panel below; notes how many games were changed by hand |
 | Reset settings | | two taps to confirm |
+
+More panel: note length (1.2 s, 0.8–2.0 s); next round starts by itself
+(on); rest after this many rights (age preset; never, 6, 8, 10, 12, 15).
+Then one row per game (the current one first and open), marked "changed"
+when it differs from the age preset, with: starts at and can get up to
+(ladder rungs), show the answer for the first 0/1/2/3/5 rounds, then
+light it while it plays, glow after 0–3 misses, glow after 0/3/5/8 s,
+replay after 0–3 misses, and "back to the age setting". Free play and
+Drum along show only their rung.
 
 ### 2.7 Platform
 
@@ -175,8 +201,8 @@ Adding a game: one module in `listen-core/src/games/` implementing `Game`
 (a two-picture game is a single `Duo` constant), one entry in `ALL`, and
 its pictures in `listen-web/src/art.rs`. The gate, round machine, audio,
 settings and layout are shared, so a game adds a few kilobytes. Current
-size: about 175 KB of wasm (81 KB gzipped) for all eight games, plus
-38 KB of glue.
+size: about 240 KB of wasm (100 KB gzipped) for all ten games and the
+singer, plus 39 KB of glue.
 
 Build: `tools/build.sh` (`cargo build --release --target
 wasm32-unknown-unknown`, `wasm-bindgen --target web`, optional `wasm-opt
@@ -186,7 +212,9 @@ lacks: `wasm-tools validate --features=-relaxed-simd`.
 ## 4. Testing
 
 - `cargo test --workspace`: the gate, the round machine for every game,
-  settings and level tables (`crates/listen-core/tests/acceptance.rs` plus
+  help and adaptation, the age calibration limits, the singer (syllable
+  timings, formant table, pitch of every rendered name), settings and
+  ladders (`crates/listen-core/tests/acceptance.rs` plus
   unit tests).
 - `python3 tests-browser/suite.py`: the built site in real WebKit
   (WebKitGTK 4.1 from Python, the Safari engine family; not Playwright,
@@ -195,6 +223,8 @@ lacks: `wasm-tools validate --features=-relaxed-simd`.
   audio context never runs: the harness first checks that the game shows
   retry and keeps answers closed, then shims only the audio clock to play
   every game through.
+- `cargo run -p listen-core --example sing -- <dir>` renders every sung
+  name to WAV and prints its measured pitch.
 - Not covered automatically: sound quality and loudness on an iPhone
   speaker, Home Screen launch, offline on a device. Check these by hand.
 
@@ -210,6 +240,7 @@ lacks: `wasm-tools validate --features=-relaxed-simd`.
 | Hold through the end of the question | no answer | core |
 | 10 rapid taps | one answer, one transition | core |
 | Wrong answer | gentle; same question stays | core, browser |
+| Age 2, first rounds | two choices, answer glows, other dimmed and never wrong | core, browser |
 | Right answer | sound, celebration, next round | core, browser |
 | Audio cannot start | retry shown, answers stay closed | core, browser |
 | Page hidden mid-question | clean return to Ready | core |

@@ -23,5 +23,5 @@ features = [
   "AudioContext", "AudioContextState", "BaseAudioContext", "AudioNode", "AudioParam", "GainNode",
   "OscillatorNode", "AudioScheduledSourceNode", "BiquadFilterNode", "BiquadFilterType",
   "DynamicsCompressorNode", "AudioDestinationNode", "AudioBuffer", "AudioBufferSourceNode",
-  "SpeechSynthesis", "SpeechSynthesisUtterance", "HtmlAudioElement", "HtmlMediaElement",
+  "HtmlAudioElement", "HtmlMediaElement",
 ]

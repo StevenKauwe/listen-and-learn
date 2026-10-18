@@ -27,7 +27,7 @@ cp -r web/icons dist/
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="description" content="Ear-training games for small children: high and low, same and different, up and down, Do Re Mi.">
+<meta name="description" content="Ear-training games for children aged 2 to 5: high and low, same and different, up and down, timbre, beat, Do Re Mi.">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-180.png">

@@ -13,12 +13,12 @@ impl Game for Play {
     fn title(&self) -> &'static str {
         "Free play"
     }
-    fn levels(&self) -> &'static [&'static str] {
+    fn steps(&self) -> &'static [&'static str] {
         // Pentatonic first: any order of these notes sounds pleasant.
         &["Six bars (pentatonic)", "Eight bars (Do to Do)"]
     }
-    fn targets(&self, level: u8) -> Vec<u8> {
-        if level == 0 {
+    fn targets(&self, step: u8) -> Vec<u8> {
+        if step == 0 {
             vec![0, 1, 2, 4, 5, 7]
         } else {
             (0..8).collect()
@@ -29,7 +29,7 @@ impl Game for Play {
             answer: vec![],
             sound: Sound::default(),
             name: None,
-            say: None,
+            sing: None,
         }
     }
     fn answer_sound(&self, k: Knobs, target: u8) -> Sound {

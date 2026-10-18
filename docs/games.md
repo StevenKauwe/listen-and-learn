@@ -1,127 +1,113 @@
 # Listen & Learn: games
 
 Every game follows [spec.md](spec.md). Each section gives the route, the
-targets, what a question sounds like, the levels (easiest first; the
-default is marked) and any rows beyond the shared ones.
+targets, what a question sounds like, the ladder (easiest rung first) and
+any rows beyond the shared ones. Which rungs each age uses, and why, is
+in [research.md](research.md) and `listen-core/src/calib.rs`.
 
 ## Do Re Mi (`#notes`)
 
-Hear one note, touch its coloured bar. The note is never shown before a
-right answer; after one, the message names it ("Mi!").
+Hear one note, touch its coloured bar. After a right answer the message
+names it ("Mi!") and, with names on, the name is sung on that pitch.
 
-| Level | Bars | |
-|---|---|---|
-| Beginner | Do, Mi, Sol | widely separated |
-| Standard | Do, Re, Mi | **default** |
-| Intermediate | Do to Sol | |
-| Advanced | Do to Ti | |
+| Rung | Bars |
+|---|---|
+| 0 | Mi Sol |
+| 1 | Mi Sol La |
+| 2 | Do Mi Sol La |
+| 3 | Do Re Mi Sol La |
+| 4 | Do to high Do |
 
-- One bar tone of the adult note length. The same note never comes twice
-  in a row. The answer plays its own note at the same length and level.
-- Rows: every question is in the level's set; never the same note twice
-  running; question and answer sound identical for the right bar.
+- One bar tone of the adult note length; the bar lights while it plays
+  when help allows. With three or more bars the same note never comes
+  twice running; with two, runs are capped at three.
+- Rows: every question is in the rung's set; question and answer sound
+  identical for the right bar; the sung name is at the note's MIDI pitch.
 
 ## Bird or Fish (`#birdfish`)
 
 High or low. The bird flies in the sky (top), the fish swims in the water
 (bottom), in portrait and landscape alike.
 
-| Level | High notes | Low notes |
-|---|---|---|
-| Very far apart (**default**) | A5–D6 | A2–D3 |
-| Two octaves | E5–G5 | E3–G3 |
-| One octave | G4–A4, after a middle-C reference | G3–A3, after a middle-C reference |
+| Rung | High notes | Low notes | Gap |
+|---|---|---|---|
+| 0 | A5–D6 | A2–D3 | 31 st |
+| 1 | E5–G5 | E3–G3 | 21 st |
+| 2 | B♭4–C5, after middle C | C3–D3, after middle C | 20 st |
+| 3 | F4–G4, after middle C | F3–G3, after middle C | 10 st |
 
-- Levels 1–2 play the note twice; level 3 plays middle C first.
+- Rungs 0–1 play the note twice; 2–3 play middle C first (never lit).
 - Low notes stay at or above A2 (110 Hz) so phone speakers carry them.
 - Touching the bird chirps high; touching the fish blubs low.
-- Row: at every level the lowest high note is ≥ 10 semitones above the
-  highest low note.
 
 ## Same or Different (`#twins`)
 
 Two notes. Twin chicks for same; a chick and a ladybug for different.
-
-| Level | Gap when different |
-|---|---|
-| Very different (**default**) | 12 semitones |
-| Different | 5 or 7 semitones |
-| Close | 2 semitones |
-
-- Same and different are equally likely. Row: same means identical
-  pitches; different means exactly the level's gap.
+Gap when different, by rung: 12, 7, 5, 3–4, 2, 1 semitones. Same and
+different are equally likely.
 
 ## Up or Down (`#stairs`)
 
-A short tune climbs or falls; a little walker climbs or descends the
-stairs on a right answer. Up is the top picture in portrait.
-
-| Level | Tune |
-|---|---|
-| Big jumps (**default**) | Do Mi Sol Do (arpeggio) |
-| Five steps | Do Re Mi Fa Sol |
-| Three steps | Do Re Mi |
-
-- Starts on G3, A3, C4 or D4. Row: up tunes strictly rise, down tunes
-  strictly fall.
+A short tune climbs or falls; a walker climbs or descends on a right
+answer. Rungs: Do Mi Sol Do (octave), Do Mi Sol, five steps, three steps.
+Starts on G3, A3, C4 or D4. Row: up strictly rises, down strictly falls.
 
 ## Echo (`#echo`)
 
-Copy a short pattern on the bars, Simon-style. Beads above the bars fill
-in the colour of each note copied.
+Copy a short pattern on the bars, Simon-style. Beads fill in the colour
+of each note copied. With help, each bar lights as it plays.
 
-| Level | Bars | Pattern | Bars light while playing |
-|---|---|---|---|
-| Two notes, lights (**default**) | Do Mi Sol | 2 | yes |
-| Three notes, lights | Do Mi Sol | 3 | yes |
-| Three notes, by ear | Do Mi Sol | 3 | no |
-| Four notes, by ear | Do to Sol | 4 | no |
+| Rung | Bars | Pattern |
+|---|---|---|
+| 0 | Mi Sol | 2 |
+| 1 | Mi Sol La | 2 |
+| 2 | Mi Sol La | 3 |
+| 3 | Do Mi Sol La | 3 |
+| 4 | Do Re Mi Sol La | 4 |
 
-- Notes 0.55 s apart, never the same note twice in a row, never the same
-  pattern twice running.
+- Notes 0.55 s apart, never the same note twice in a row; with more than
+  two bars, never the same pattern twice running.
 - Each touch plays its bar. A slip wiggles that bar, clears the beads and
-  replays the pattern after 0.9 s. The whole pattern copied is a right
-  answer.
-- Lighting bars is the one place a game shows the notes before the answer,
-  and only on the easy levels.
+  replays the pattern after 0.9 s. When the answer is shown, the next bar
+  to touch glows after each step.
 
 ## Turtle or Rabbit (`#tempo`)
 
-The same five-note tune (Sol Mi Sol Mi Do), slow or fast.
-
-| Level | Slow (s per note) | Fast (s per note) |
-|---|---|---|
-| Very different (**default**) | 0.8 | 0.2 |
-| Different | 0.62 | 0.3 |
-| Close | 0.5 | 0.36 |
-
-- Row: slow is at least 1.35× the fast note spacing at every level.
+The same five-note tune (Sol Mi Sol Mi Do), slow or fast. Seconds per
+note (slow, fast) by rung: (0.9, 0.3), (0.8, 0.4), (0.72, 0.48),
+(0.69, 0.51), (0.66, 0.54).
 
 ## Mouse or Elephant (`#loud`)
 
-The same three notes (Do Mi Sol), quiet or loud. The mouse is drawn small,
-the elephant large.
+The same three notes (Do Mi Sol), quiet or loud. Loudness gap by rung:
+24, 18, 12, 8, 6 dB. The loud version stays under the compressor
+threshold, so the gap is real.
 
-| Level | Loudness gap |
-|---|---|
-| Very different (**default**) | 24 dB |
-| Different | 14 dB |
-| Close | 8 dB |
+## Who's singing? (`#who`)
 
-- The loud version stays under the compressor threshold, so the gap is
-  real. The phone's own volume shifts both equally; the gap is what the
-  child compares.
+The same three-note tune on the same pitches (sol, mi, la), played by a
+singer (sung "la"), a xylophone, a bell or a flute: only the timbre
+differs. Rungs: singer or xylophone; add the bell; add the flute. Each
+picture plays its own instrument when touched. Row: pitches and timing
+are identical whoever plays.
+
+## Drum along (`#drum`)
+
+A bear drums a steady beat; the child drums on a big drum, which sounds
+at contact. Listen starts the bear; beads fill as drums count.
+
+| Rung | Beat | Counts when | Lead-in | Goal | Bear plays |
+|---|---|---|---|---|---|
+| 0 | 0.5 s | every drum | 4 | 8 | 16 beats |
+| 1 | 0.6 s | within ±25 % of a beat | 4 | 8 | 24 |
+| 2 | 0.5 s | within ±18 % of a beat | 4 | 10 | 28 |
+
+- Drums closer than 0.15 s count once. On judged rungs each beat counts
+  once and the lead-in never counts. Nothing is ever wrong: the bear
+  rests at the end and Listen starts again.
 
 ## Free play (`#play`)
 
 A xylophone with no questions and no wrong answers. Bars sound at contact
 (the one exception to judging on release); a note floats up from each.
-
-| Level | Bars |
-|---|---|
-| Six bars (**default**) | Do Re Mi Sol La Do (pentatonic) |
-| Eight bars | Do to high Do |
-
-- The pentatonic set has no semitone steps, so any order sounds
-  consonant.
-- Row: one sound per touch; a second finger is ignored.
+Rungs: six bars (Do Re Mi Sol La Do, pentatonic), eight bars.

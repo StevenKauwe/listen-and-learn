@@ -1,25 +1,25 @@
 //! Mouse or Elephant: the same tune, quiet or loud. Target 0 = mouse.
 
-use super::Duo;
+use super::{lit, Duo};
 use crate::music::{Sound, Tone};
 use crate::rng::Rng;
 
 pub const LOUD: Duo = Duo {
     slug: "loud",
     title: "Mouse or Elephant",
-    levels: &["Very different", "Different", "Close"],
+    steps: &["24 dB", "18 dB", "12 dB", "8 dB", "6 dB"],
     ask,
     voices: [mouse, elephant],
     hint,
 };
 
-/// Loudness gap in decibels per level.
-pub const GAP_DB: [f32; 3] = [24.0, 14.0, 8.0];
+/// Loudness gap in decibels per step.
+pub const GAP_DB: [f32; 5] = [24.0, 18.0, 12.0, 8.0, 6.0];
 
-fn ask(level: u8, rng: &mut Rng) -> (u8, Sound) {
+fn ask(step: u8, rng: &mut Rng) -> (u8, Sound) {
     let quiet = rng.coin();
     let g = if quiet {
-        10f32.powf(-GAP_DB[(level as usize).min(2)] / 20.0)
+        10f32.powf(-GAP_DB[(step as usize).min(GAP_DB.len() - 1)] / 20.0)
     } else {
         1.0
     };
@@ -28,7 +28,8 @@ fn ask(level: u8, rng: &mut Rng) -> (u8, Sound) {
         .enumerate()
         .map(|(i, &m)| Tone::bar(m, i as f32 * 0.4, 0.6).gain(g))
         .collect();
-    (if quiet { 0 } else { 1 }, Sound::of(tones))
+    let a = if quiet { 0 } else { 1 };
+    (a, lit(a, Sound::of(tones)))
 }
 
 fn mouse() -> Sound {

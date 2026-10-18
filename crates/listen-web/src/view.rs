@@ -3,7 +3,7 @@
 
 use crate::art;
 use listen_core::music::SCALE;
-use listen_core::{Game, Settings, ALL};
+use listen_core::{Age, Game, Settings, ALL};
 
 /// Target ids in `data-t`: answers use their game ids (0..), these are
 /// the shared controls.
@@ -57,18 +57,37 @@ fn short_title(slug: &str, title: &'static str) -> &'static str {
         "twins" => "Same?",
         "loud" => "Quiet or Loud",
         "tempo" => "Slow or Fast",
+        "who" => "Who's singing?",
+        "drum" => "Drum along",
         "play" => "Play",
         _ => title,
     }
 }
 
-pub fn game(g: &dyn Game, level: u8) -> String {
-    let targets = g.targets(level);
+pub fn game(g: &dyn Game, targets: &[u8]) -> String {
     let stage = match g.slug() {
-        "notes" | "play" => xylo(&targets),
+        "notes" | "play" => xylo(targets),
         "echo" => format!(
             r#"<div class="echo"><div class="beads" id="beads"></div>{}</div>"#,
-            xylo(&targets)
+            xylo(targets)
+        ),
+        "who" => {
+            let picks: String = targets
+                .iter()
+                .map(|&t| {
+                    format!(
+                        r#"<button class="pick toy w{t}" data-t="{t}" aria-label="{}">{}</button>"#,
+                        who_label(t),
+                        art::who(t)
+                    )
+                })
+                .collect();
+            format!(r#"<div class="duo who n{}">{picks}</div>"#, targets.len())
+        }
+        "drum" => format!(
+            r#"<div class="drumming"><div class="beads" id="beads"></div><div class="bear-wrap" data-t="1" aria-hidden="true">{}</div><button class="pick pad toy" data-t="0" aria-label="Drum">{}</button></div>"#,
+            art::bear_svg(),
+            art::drum_svg()
         ),
         slug => {
             let (a, b) = art::duo(slug);
@@ -89,6 +108,15 @@ pub fn game(g: &dyn Game, level: u8) -> String {
         gear = knob_hold("gear", "Grown-ups: hold for settings", art::GEAR),
         spk = art::SPEAKER,
     )
+}
+
+fn who_label(t: u8) -> &'static str {
+    match t {
+        0 => "Singer",
+        1 => "Xylophone",
+        2 => "Bell",
+        _ => "Flute",
+    }
 }
 
 fn pick_label(slug: &str, t: u8) -> &'static str {
@@ -140,6 +168,19 @@ pub fn xylo(targets: &[u8]) -> String {
     )
 }
 
+/// Drum along: one bead per drum still to count.
+pub fn drum_beads(goal: usize, done: usize) -> String {
+    (0..goal)
+        .map(|i| {
+            if i < done {
+                r#"<i class="bead on" style="--cb:var(--do)"></i>"#
+            } else {
+                r#"<i class="bead"></i>"#
+            }
+        })
+        .collect()
+}
+
 pub fn beads(answer: &[u8], done: usize) -> String {
     (0..answer.len())
         .map(|i| {
@@ -155,52 +196,196 @@ pub fn beads(answer: &[u8], done: usize) -> String {
         .collect()
 }
 
-pub fn sheet(s: &Settings, current: Option<usize>) -> String {
-    let mut games = String::new();
+/// What the settings sheet shows besides the settings themselves.
+#[derive(Clone, Copy, Default)]
+pub struct SheetView {
+    /// The "More" panel instead of the simple one.
+    pub more: bool,
+    /// The game whose details are open in "More".
+    pub open: Option<usize>,
+}
+
+fn chips(act: &str, items: &[(String, bool)]) -> String {
+    let mut out = String::new();
+    for (i, (label, on)) in items.iter().enumerate() {
+        out.push_str(&format!(
+            r#"<button class="chip" data-act="{act}:{i}" aria-pressed="{on}">{label}</button>"#
+        ));
+    }
+    format!(r#"<div class="chips">{out}</div>"#)
+}
+
+fn tog(act: &str, label: &str, on: bool) -> String {
+    format!(
+        r#"<button class="tog" data-act="{act}" role="switch" aria-checked="{on}"><span>{label}</span><i></i></button>"#
+    )
+}
+
+/// A labelled chip row whose values are `values` (index = action value).
+fn row(label: &str, act: &str, values: &[&str], current: usize) -> String {
+    let items: Vec<(String, bool)> = values
+        .iter()
+        .enumerate()
+        .map(|(i, v)| (v.to_string(), i == current))
+        .collect();
+    format!(
+        r#"<div class="row-set"><h5>{label}</h5>{}</div>"#,
+        chips(act, &items)
+    )
+}
+
+/// Chip values for "after N" settings and the index of the current one.
+const COUNTS: [u8; 4] = [0, 1, 2, 3];
+const WAITS: [u8; 4] = [0, 3, 5, 8];
+const SHOWS: [u8; 5] = [0, 1, 2, 3, 5];
+pub const SET_LENS: [u8; 6] = [0, 6, 8, 10, 12, 15];
+
+fn idx(values: &[u8], v: u8) -> usize {
+    values.iter().position(|&x| x == v).unwrap_or(usize::MAX)
+}
+
+fn game_panel(s: &Settings, i: usize) -> String {
+    let g = ALL[i];
+    let t = s.tunes[i];
+    let steps = g.steps();
+    let mut body = String::new();
+    if steps.len() > 1 {
+        let easy = if g.free() || g.beat() {
+            "Sounds"
+        } else {
+            "Starts at"
+        };
+        body.push_str(&row(easy, &format!("t:{i}:lo"), steps, t.lo as usize));
+        if !g.free() && !g.beat() {
+            body.push_str(&row(
+                "Can get up to",
+                &format!("t:{i}:hi"),
+                steps,
+                t.hi as usize,
+            ));
+        }
+    }
+    if !g.free() && !g.beat() {
+        body.push_str(&row(
+            "Show the answer for the first",
+            &format!("t:{i}:show"),
+            &["Off", "1 round", "2 rounds", "3 rounds", "5 rounds"],
+            idx(&SHOWS, t.show),
+        ));
+        body.push_str(&tog(
+            &format!("t:{i}:light"),
+            "Then light the answer while it plays",
+            t.light,
+        ));
+        body.push_str(&row(
+            "Glow the answer after",
+            &format!("t:{i}:glow_miss"),
+            &["Never", "1 miss", "2 misses", "3 misses"],
+            idx(&COUNTS, t.glow_miss),
+        ));
+        body.push_str(&row(
+            "Glow after waiting",
+            &format!("t:{i}:glow_wait"),
+            &["Never", "3 s", "5 s", "8 s"],
+            idx(&WAITS, t.glow_wait),
+        ));
+        body.push_str(&row(
+            "Play it again after",
+            &format!("t:{i}:replay"),
+            &["Never", "1 miss", "2 misses", "3 misses"],
+            idx(&COUNTS, t.replay),
+        ));
+    }
+    if s.custom(i) {
+        body.push_str(&format!(
+            r#"<button class="reset" data-act="t:{i}:preset">Back to the age {} setting</button>"#,
+            s.age.label()
+        ));
+    }
+    body
+}
+
+pub fn sheet(s: &Settings, current: Option<usize>, v: SheetView) -> String {
+    let done = r#"<button class="done" data-act="close">Done</button>"#;
+    if !v.more {
+        let ages: Vec<(String, bool)> = Age::ALL
+            .iter()
+            .map(|a| (a.label().to_string(), *a == s.age))
+            .collect();
+        let custom = (0..ALL.len()).filter(|&i| s.custom(i)).count();
+        let note = if custom > 0 {
+            format!(
+                r#"<span class="hint-line">{custom} game{} changed by hand</span>"#,
+                if custom == 1 { "" } else { "s" }
+            )
+        } else {
+            String::new()
+        };
+        return format!(
+            r#"<div class="sheet-head"><h2>Grown-ups</h2>{done}</div>
+<div class="sheet-scroll">
+<section><h3>Child's age</h3><div class="ages">{}</div><p class="blurb">{}</p></section>
+<section><h3>Sound</h3>
+<label class="slider" for="s-volume"><span>Volume</span><input id="s-volume" type="range" min="0" max="100" step="5" value="{vol}"><output id="o-volume">{vol}%</output></label>
+{sing}{cheer}</section>
+<button class="more" data-act="more"><span>More settings<small>Every game, hints, sounds, sets</small>{note}</span><i>›</i></button>
+<section class="fine"><p>Hold the house for 1.5 seconds to go home. Hold the gear for 2 seconds to open this sheet. Settings stay on this device.</p>
+<button class="reset" data-act="reset" id="reset">Reset settings</button></section>
+</div>"#,
+            chips("age", &ages).replace("class=\"chip\"", "class=\"chip age\""),
+            s.age.blurb(),
+            vol = (s.volume * 100.0).round() as u32,
+            sing = tog("tog:sing", "Sing note names", s.sing),
+            cheer = tog("tog:cheer", "Reward chime", s.cheer),
+        );
+    }
     let mut order: Vec<usize> = (0..ALL.len()).collect();
     if let Some(c) = current {
         order.retain(|&i| i != c);
         order.insert(0, c);
     }
+    let mut games = String::new();
     for i in order {
         let g = ALL[i];
-        let chips: String = g
-            .levels()
-            .iter()
-            .enumerate()
-            .map(|(l, name)| {
-                let on = s.levels[i] as usize == l;
-                format!(r#"<button class="chip" data-act="lv:{i}:{l}" aria-pressed="{on}">{name}</button>"#)
-            })
-            .collect();
-        let here = if Some(i) == current { " here" } else { "" };
+        let open = v.open == Some(i);
+        let badge = if s.custom(i) {
+            r#"<b class="badge">changed</b>"#.to_string()
+        } else {
+            format!(r#"<b class="badge soft">age {}</b>"#, s.age.label())
+        };
+        let here = if Some(i) == current {
+            r#"<em>now playing</em>"#
+        } else {
+            ""
+        };
         games.push_str(&format!(
-            r#"<div class="lv{here}"><h4>{}</h4><div class="chips">{chips}</div></div>"#,
-            g.title()
+            r#"<div class="gm{}"><button class="gm-head" data-act="open:{i}" aria-expanded="{open}"><span>{}{here}</span>{badge}<i>›</i></button>{}</div>"#,
+            if open { " open" } else { "" },
+            g.title(),
+            if open {
+                format!(r#"<div class="gm-body">{}</div>"#, game_panel(s, i))
+            } else {
+                String::new()
+            }
         ));
     }
-    let tog = |key: &str, label: &str, on: bool| {
-        format!(
-            r#"<button class="tog" data-act="tog:{key}" role="switch" aria-checked="{on}"><span>{label}</span><i></i></button>"#
-        )
-    };
     format!(
-        r#"<div class="sheet-head"><h2>Grown-ups</h2><button class="done" data-act="close">Done</button></div>
+        r#"<div class="sheet-head"><button class="back" data-act="more">‹ Back</button><h2>More</h2>{done}</div>
 <div class="sheet-scroll">
-<section><h3>Levels</h3>{games}</section>
-<section><h3>Sound</h3>
-<label class="slider" for="s-volume"><span>Volume</span><input id="s-volume" type="range" min="0" max="100" step="5" value="{vol}"><output id="o-volume">{vol}%</output></label>
+<section><h3>Every game</h3>
 <label class="slider" for="s-len"><span>Note length</span><input id="s-len" type="range" min="0.8" max="2" step="0.1" value="{len:.1}"><output id="o-len">{len:.1} s</output></label>
-{speak}{cheer}</section>
-<section><h3>Play</h3>{auto}{assist}</section>
-<section class="fine"><p>Hold the house for 1.5 seconds to go home. Hold the gear for 2 seconds to open this sheet. Settings stay on this device.</p>
-<button class="reset" data-act="reset" id="reset">Reset settings</button></section>
+{auto}
+{sets}
+</section>
+<section><h3>Each game</h3><p class="blurb">Choosing an age resets these. Games move between "starts at" and "can get up to": closer after three right first time, back after two misses.</p>{games}</section>
 </div>"#,
-        vol = (s.volume * 100.0).round() as u32,
         len = s.note_len,
-        speak = tog("speak", "Say note names", s.speak),
-        cheer = tog("cheer", "Reward chime", s.cheer),
-        auto = tog("auto_next", "Next round starts by itself", s.auto_next),
-        assist = tog("assist", "Glow the answer after 3 tries", s.assist),
+        auto = tog("tog:auto_next", "Next round starts by itself", s.auto_next),
+        sets = row(
+            "Rest after this many right answers",
+            "set",
+            &["Never", "6", "8", "10", "12", "15"],
+            idx(&SET_LENS, s.set_len),
+        ),
     )
 }

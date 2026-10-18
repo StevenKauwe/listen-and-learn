@@ -77,8 +77,14 @@ pub fn freq(midi: f32) -> f32 {
 pub enum Voice {
     /// The warm marimba-like bar: every question and answer.
     Bar,
-    /// The bright, soft reward chime.
+    /// The bright, soft reward chime (also the bell in Who's singing?).
     Chime,
+    /// A soft flute: near-pure tone, slow attack, held.
+    Flute,
+    /// A small hand drum: a pitch-dropping thump.
+    Drum,
+    /// A sung syllable (index into `voice::SYLLABLES`) at the tone's pitch.
+    Sing(u8),
 }
 
 /// One scheduled tone, relative to the start of its [`Sound`].
@@ -106,6 +112,10 @@ impl Tone {
             voice: Voice::Bar,
             light: None,
         }
+    }
+    pub fn voiced(mut self, v: Voice) -> Self {
+        self.voice = v;
+        self
     }
     pub fn gain(mut self, g: f32) -> Self {
         self.gain = g;
@@ -146,7 +156,18 @@ impl Sound {
         self.dur = self.dur.max(at + 0.18 + 0.6);
         self
     }
+
+    /// Append the sung name of `degree` at MIDI `midi`, starting at `at`.
+    pub fn with_name(mut self, degree: u8, midi: u8, at: f32) -> Self {
+        let t = Tone::bar(midi, at, SUNG_LEN).voiced(Voice::Sing(degree % 7));
+        self.dur = self.dur.max(at + SUNG_LEN);
+        self.tones.push(t);
+        self
+    }
 }
+
+/// Length of a sung note name, seconds.
+pub const SUNG_LEN: f32 = 0.8;
 
 #[cfg(test)]
 mod tests {

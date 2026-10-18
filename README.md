@@ -1,16 +1,19 @@
 # Listen & Learn
 
-Ear-training games for small children, played on a phone: Do Re Mi, Bird
-or Fish (high and low), Same or Different, Up or Down, Echo, Turtle or
-Rabbit (slow and fast), Mouse or Elephant (quiet and loud), and a free-play
-xylophone. Pure Rust compiled to WebAssembly. No accounts, no backend, no
+Ear-training games for children aged 2 to 5, played on a phone: Do Re Mi
+(note names sung on their pitch), Bird or Fish (high and low), Same or
+Different, Up or Down, Echo, Turtle or Rabbit (slow and fast), Mouse or
+Elephant (quiet and loud), Who's singing? (timbre), Drum along (steady
+beat) and a free-play xylophone. One age setting calibrates every game. Pure Rust compiled to WebAssembly. No accounts, no backend, no
 analytics, no ads.
 
 Play: https://stevenkauwe.github.io/listen-and-learn/
 
 - [docs/spec.md](docs/spec.md): shared rules for every game (touch, audio,
   feedback, settings, platform, architecture, acceptance rows).
-- [docs/games.md](docs/games.md): each game's rules and levels.
+- [docs/games.md](docs/games.md): each game's rules and ladders.
+- [docs/research.md](docs/research.md): the evidence behind the games,
+  ages and numbers.
 
 ## Layout
 

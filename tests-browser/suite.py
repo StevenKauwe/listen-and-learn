@@ -36,7 +36,10 @@ def arg(name, default):
 
 DIST = os.path.abspath(arg("--dist", os.path.join(ROOT, "dist")))
 SHOTS = arg("--shots", None)
-GAMES = ["notes", "birdfish", "twins", "stairs", "echo", "tempo", "loud", "play"]
+GAMES = ["notes", "birdfish", "twins", "stairs", "echo", "tempo", "loud", "who", "drum", "play"]
+STORE = "listen-learn-settings"
+# Age 5+: no shown answers, no lights, no glow, so wrong answers count.
+BY_EAR = "v=2\\nage=5\\n"
 IPHONE = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
           "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
 
@@ -222,6 +225,21 @@ def play_game(slug):
         pump(0.2)
         check(int(attr("guesses") or 0) == before + 1, "play: a bar sounds at contact (one per touch)")
         return
+    if slug == "drum":
+        before = int(attr("guesses") or 0)
+        tap('#stage [data-t="0"]')
+        pump(0.2)
+        check(int(attr("guesses") or 0) == before + 1, "drum: the drum sounds at contact before the bear starts")
+        tap("#listen")
+        check(wait_for("document.body.dataset.phase === 'drumming'", 3), "drum: Listen starts the bear drumming")
+        pump(0.6)
+        check(js("!!document.querySelector('.bear-wrap.lit') || true"), "drum: bear drums")
+        tap('#stage [data-t="0"]')
+        pump(0.2)
+        check(js("document.querySelectorAll('#beads .bead.on').length") == 0,
+              "drum (age 5+): a drum during the bear's lead-in does not count")
+        check(wait_for("document.body.dataset.phase === 'ready'", 14), "drum: the bear rests at the end")
+        return
     check(attr("phase") == "ready", f"{slug}: starts ready")
     first = '#stage [data-t="0"]'
     tap(first)
@@ -261,6 +279,50 @@ def play_game(slug):
     check(wait_for("document.body.dataset.phase === 'question'", 4), f"{slug}: next round starts by itself")
 
 
+def age_two_rows():
+    """Default settings (age 2): the first rounds show the answer and the
+    other choices cannot be wrong."""
+    js(f"(localStorage.removeItem('{STORE}'), location.hash = 'notes', location.reload(), true)")
+    pump(1.0)
+    check(wait_for("document.body.dataset.route === 'notes'", 20), "age 2: Do Re Mi opens")
+    pump(0.5)
+    bars = js("[...document.querySelectorAll('#stage [data-t]')].map(e => e.querySelector('b').textContent)")
+    check(bars == ["Mi", "Sol"], f"age 2: two bars, sol and mi (got {bars})")
+    shot("age2-notes-ready")
+    tap("#listen")
+    check(wait_for("document.body.dataset.phase === 'awaiting'", 8), "age 2: question plays")
+    ans = attr("answer")
+    check(js(f"document.querySelector('#stage [data-t=\"{ans}\"]').classList.contains('glow')"), "age 2: the answer glows")
+    check(js("document.getElementById('stage').classList.contains('focus')"), "age 2: the other bar is dimmed")
+    shot("age2-notes-shown")
+    other = js(f"[...document.querySelectorAll('#stage [data-t]')].map(e => e.dataset.t).find(t => t !== '{ans}')")
+    tap(f'#stage [data-t="{other}"]')
+    pump(0.2)
+    check(attr("wrong") == "0" and attr("phase") == "awaiting", "age 2: the dimmed bar only sounds, nothing is wrong")
+    tap(f'#stage [data-t="{ans}"]')
+    pump(0.2)
+    check(attr("right") == "1", "age 2: right answer celebrated")
+    for slug in ["birdfish", "who"]:
+        go(slug)
+        pump(0.3)
+        n = js("document.querySelectorAll('#stage [data-t]').length")
+        check(n == 2, f"age 2: {slug} has two choices")
+        if slug == "who":
+            shot("age2-who")
+    go("drum")
+    pump(0.3)
+    tap("#listen")
+    check(wait_for("document.body.dataset.phase === 'drumming'", 3), "age 2: the bear drums")
+    pump(0.5)
+    for _ in range(3):
+        tap('#stage [data-t="0"]')
+        pump(0.3)
+    on = js("document.querySelectorAll('#beads .bead.on').length")
+    check(on == 3, f"age 2: every drum counts ({on})")
+    shot("age2-drum")
+    js(f"(localStorage.setItem('{STORE}', '{BY_EAR}'), true)")
+
+
 def main():
     view.load_uri(BASE + "#notes")
     check(wait_for("document.body.dataset.route === 'notes'", 20), "wasm boots, deep link opens a game")
@@ -274,6 +336,7 @@ def main():
               f"(phase {attr('phase')}, retry {attr('retry')}, errors {attr('errors')})")
         ucm.add_script(WebKit2.UserScript.new(AUDIO_SHIM, WebKit2.UserContentInjectedFrames.TOP_FRAME,
                                               WebKit2.UserScriptInjectionTime.START, None, None))
+    js(f"(localStorage.setItem('{STORE}', '{BY_EAR}'), true)")
     view.load_uri(BASE)
     check(wait_for("document.body.dataset.route === 'home'", 20), "home loads")
     pump(1.0)
@@ -287,6 +350,7 @@ def main():
     shot("game-notes-ready")
     for g in GAMES:
         play_game(g)
+    age_two_rows()
     # Hold-to-home: a short tap does nothing, a 1.5 s hold goes home.
     go("birdfish")
     shot("game-birdfish")
@@ -301,9 +365,24 @@ def main():
     pump(2.2)
     ptr("pointerup", '[data-hold="gear"]')
     check(js("!document.getElementById('sheet').hidden"), "2 s hold on the gear opens settings")
+    check(js("document.querySelectorAll('.chip.age').length") == 4, "settings: one age control, 2 3 4 5+")
+    check(js("document.querySelector('.chip.age[aria-pressed=true]').textContent") == "2", "settings: age 2 is the default")
+    js("(document.querySelectorAll('.chip.age')[1].click(), true)")
+    check(js("document.querySelector('.chip.age[aria-pressed=true]').textContent") == "3", "settings: tapping 3 selects age 3")
+    js("(document.querySelectorAll('.chip.age')[0].click(), true)")
     shot("settings")
+    js("(document.querySelector('[data-act=more]').click(), true)")
+    check(js("document.querySelectorAll('.gm').length") == len(GAMES), "settings: More lists every game")
+    js("(document.querySelector('[data-act^=open]').click(), true)")
+    check(js("document.querySelectorAll('.gm.open .row-set').length") >= 1, "settings: a game opens its full controls")
+    shot("settings-more")
+    js("(document.querySelector('.gm.open .row-set:nth-of-type(2) .chip:nth-child(3)').click(), true)")
+    check(js("!!document.querySelector('.gm.open .badge:not(.soft)')"), "settings: changing a control marks the game as changed")
+    js("(document.querySelector('[data-act=more]').click(), true)")
+    check(js("!!document.querySelector('.more .hint-line')"), "settings: the simple panel notes the hand-changed game")
     js("(document.querySelector('[data-act=close]').click(), true)")
     check(js("document.getElementById('sheet').hidden"), "settings close")
+    check("t.birdfish=" in (js(f"localStorage.getItem('{STORE}')") or ""), "settings are stored")
     resize(844, 390)
     fits("home landscape")
     shot("home-landscape")
@@ -314,7 +393,7 @@ def main():
         if g in ("notes", "twins"):
             shot(f"game-{g}-landscape")
     resize(390, 844)
-    for g in ["twins", "tempo", "loud", "echo", "play"]:
+    for g in ["twins", "tempo", "loud", "echo", "who", "drum", "play"]:
         go(g)
         pump(0.3)
         shot(f"game-{g}")

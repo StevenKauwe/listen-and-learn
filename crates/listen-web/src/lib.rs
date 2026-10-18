@@ -7,8 +7,10 @@ mod audio;
 mod view;
 
 use audio::Audio;
-use listen_core::settings::{HOLD_HOME_MS, HOLD_SETTINGS_MS};
-use listen_core::{by_slug, Decision, Effect, Event, Phase, Round, Settings, TouchGate, ALL};
+use listen_core::calib::preset;
+use listen_core::games::drum::{self, DrumRun};
+use listen_core::settings::{HOLD_HOME_MS, HOLD_SETTINGS_MS, NOTE_LEN};
+use listen_core::{by_slug, Age, Decision, Effect, Event, Phase, Round, Settings, TouchGate, ALL};
 use std::cell::RefCell;
 use view::{T_FULLSCREEN, T_LISTEN, T_TILE};
 use wasm_bindgen::prelude::*;
@@ -120,7 +122,10 @@ struct App {
     epoch: u32,
     wake: Option<JsValue>,
     sheet_open: bool,
+    sheet_view: view::SheetView,
     reset_armed: bool,
+    /// Drum along: the current run of beats, if the bear is drumming.
+    drum: Option<DrumRun>,
     ios: bool,
     standalone: bool,
     errors: u32,
@@ -171,7 +176,9 @@ pub fn start() -> Result<(), JsValue> {
         epoch: 0,
         wake: None,
         sheet_open: false,
+        sheet_view: view::SheetView::default(),
         reset_armed: false,
+        drum: None,
         ios,
         standalone,
         errors: 0,
@@ -273,8 +280,13 @@ impl App {
         self.win.performance().map(|p| p.now() as u32).unwrap_or(0)
     }
 
+    /// Targets sound at contact (Free play, Drum along).
     fn free(&self) -> bool {
-        matches!(self.screen, Screen::Game(i) if ALL[i].free())
+        matches!(self.screen, Screen::Game(i) if ALL[i].free() || ALL[i].beat())
+    }
+
+    fn drumming(&self) -> bool {
+        matches!(self.screen, Screen::Game(i) if ALL[i].beat())
     }
 
     // ---------- audio ----------
@@ -304,6 +316,12 @@ impl App {
     fn play(&mut self, s: &listen_core::music::Sound) {
         let Some(a) = self.audio.as_mut() else { return };
         let t0 = a.play(s);
+        self.play_lights(s, t0);
+    }
+
+    /// Light targets in time with their tones.
+    fn play_lights(&mut self, s: &listen_core::music::Sound, t0: f64) {
+        let Some(a) = self.audio.as_ref() else { return };
         let lead = t0 - a.now();
         let ep = self.epoch;
         for t in &s.tones {
@@ -467,6 +485,10 @@ impl App {
     fn is_open(&self, id: u8) -> bool {
         match self.screen {
             Screen::Home => id == T_FULLSCREEN || id >= T_TILE,
+            Screen::Game(_) if self.drumming() => match id {
+                T_LISTEN => self.drum.is_none(),
+                t => t == drum::DRUM,
+            },
             Screen::Game(_) if self.free() => id < T_LISTEN,
             Screen::Game(_) => match &self.round {
                 Some(r) if id == T_LISTEN => r.accepts_listen(),
@@ -583,6 +605,7 @@ impl App {
             a.stop_all();
         }
         self.round = None;
+        self.drum = None;
     }
 
     fn enter_home(&mut self) {
@@ -613,11 +636,17 @@ impl App {
         self.screen = Screen::Game(i);
         let g = ALL[i];
         let seed = (js_sys::Date::now() as u64 as u32) ^ ((js_sys::Math::random() * 4e9) as u32);
-        if !g.free() {
-            self.round = Some(Round::new(g, self.settings.round_cfg(i), seed));
-        }
-        self.root
-            .set_inner_html(&view::game(g, self.settings.levels[i]));
+        let tune = self.settings.tunes[i];
+        let targets = if g.free() || g.beat() {
+            g.targets(tune.lo)
+        } else {
+            let r = Round::new(g, self.settings.round_cfg(i), seed);
+            let t = r.targets();
+            self.round = Some(r);
+            t
+        };
+        self.drum = None;
+        self.root.set_inner_html(&view::game(g, &targets));
         self.body.set_attribute("data-route", g.slug()).ok();
         self.wake();
         self.sync();
@@ -627,6 +656,9 @@ impl App {
 
     fn listen_pressed(&mut self) {
         self.unlock_audio();
+        if self.drumming() {
+            return self.drum_start(self.epoch, 0);
+        }
         if self.audio.is_none() {
             return self.feed(Event::AudioFailed);
         }
@@ -720,20 +752,49 @@ impl App {
                     }
                 }
                 Effect::Hint(t) => {
-                    if let Ok(list) = self.root.query_selector_all(".glow") {
-                        for i in 0..list.length() {
-                            if let Some(el) =
-                                list.item(i).and_then(|n| n.dyn_into::<Element>().ok())
-                            {
-                                let _ = el.class_list().remove_1("glow");
-                            }
-                        }
-                    }
+                    self.clear_class("glow");
                     if let Some(el) = t.and_then(|t| self.target(t)) {
                         let _ = el.class_list().add_1("glow");
                     }
                 }
-                Effect::Speak(say) => after(450.0, move || speak(say)),
+                Effect::HintAfter { seq, secs } => {
+                    let ep = self.epoch;
+                    after(secs as f64 * 1000.0, move || {
+                        with(|a| {
+                            if a.epoch == ep && !a.sheet_open {
+                                a.feed(Event::HintTimer(seq));
+                            }
+                        });
+                    });
+                }
+                Effect::Focus(t) => {
+                    self.clear_class("keep");
+                    if let Some(stage) = self.doc.get_element_by_id("stage") {
+                        let _ = if t.is_some() {
+                            stage.class_list().add_1("focus")
+                        } else {
+                            stage.class_list().remove_1("focus")
+                        };
+                    }
+                    if let Some(el) = t.and_then(|t| self.target(t)) {
+                        let _ = el.class_list().add_1("keep");
+                    }
+                }
+                Effect::Poke { target } => {
+                    if let Some(el) = self.target(target) {
+                        self.flash_class(&el, "poke", 500.0);
+                    }
+                }
+                Effect::Step(level) => {
+                    self.body
+                        .set_attribute("data-step", &level.to_string())
+                        .ok();
+                }
+                Effect::SetDone => {
+                    self.set_msg(&format!("{}<span>All done!</span>", art::STAR), "yay");
+                    self.body.set_attribute("data-set", "done").ok();
+                    self.confetti();
+                }
             }
         }
         self.sync();
@@ -764,7 +825,12 @@ impl App {
     fn sync(&mut self) {
         self.sync_audio_attr();
         let Some(r) = &self.round else {
-            if self.free() {
+            if self.drumming() {
+                let playing = self.drum.is_some();
+                self.body
+                    .set_attribute("data-phase", if playing { "drumming" } else { "ready" })
+                    .ok();
+            } else if self.free() {
                 self.body.set_attribute("data-phase", "free").ok();
             }
             return;
@@ -793,6 +859,11 @@ impl App {
         let ans: Vec<String> = r.q.answer.iter().map(|a| a.to_string()).collect();
         self.body.set_attribute("data-answer", &ans.join(",")).ok();
         let echo = r.q.answer.len() > 1;
+        if r.phase != Phase::Ready {
+            self.body.remove_attribute("data-set").ok();
+        } else if self.body.get_attribute("data-set").is_some() {
+            return;
+        }
         let (text, mood) = match r.phase {
             Phase::Ready if r.retry => ("Tap again", "soft"),
             Phase::Ready => ("Listen!", ""),
@@ -863,7 +934,6 @@ impl App {
         let g = ALL[i];
         let k = self.settings.round_cfg(i).knobs;
         self.play(&g.answer_sound(k, id));
-        self.flash_class(el, "yay", 600.0);
         let n = self
             .body
             .get_attribute("data-guesses")
@@ -872,6 +942,11 @@ impl App {
         self.body
             .set_attribute("data-guesses", &(n + 1).to_string())
             .ok();
+        if g.beat() {
+            self.flash_class(el, "hit", 220.0);
+            return self.drum_tap();
+        }
+        self.flash_class(el, "yay", 600.0);
         let Some(fx) = self.doc.get_element_by_id("fx") else {
             return;
         };
@@ -894,11 +969,127 @@ impl App {
         }
     }
 
+    fn clear_class(&self, class: &str) {
+        if let Ok(list) = self.root.query_selector_all(&format!(".{class}")) {
+            for i in 0..list.length() {
+                if let Some(el) = list.item(i).and_then(|n| n.dyn_into::<Element>().ok()) {
+                    let _ = el.class_list().remove_1(class);
+                }
+            }
+        }
+    }
+
+    /// Stars from the middle of the stage: the end of a set.
+    fn confetti(&self) {
+        if let Some(stage) = self.doc.get_element_by_id("stage") {
+            for t in 0..3u8 {
+                let ep = self.epoch;
+                let el = stage.clone();
+                after(t as f64 * 260.0, move || {
+                    with(|a| {
+                        if a.epoch == ep {
+                            a.sparks(&el, t * 2);
+                        }
+                    });
+                });
+            }
+        }
+    }
+
+    // ---------- drum along ----------
+
+    /// Start the bear drumming once audio runs (like a question).
+    fn drum_start(&mut self, ep: u32, tries: u32) {
+        if ep != self.epoch || self.drum.is_some() {
+            return;
+        }
+        let running = self.audio.as_ref().map(|a| a.running()).unwrap_or(false);
+        self.sync_audio_attr();
+        if !running {
+            if tries < 20 {
+                after(50.0, move || {
+                    with(|a| a.drum_start(ep, tries + 1));
+                });
+            } else {
+                self.set_msg("<span>Tap again</span>", "soft");
+            }
+            return;
+        }
+        let Screen::Game(i) = self.screen else { return };
+        let beat = drum::beat(self.settings.tunes[i].lo);
+        let sound = DrumRun::new(beat, 0.0).sound();
+        let Some(au) = self.audio.as_mut() else {
+            return;
+        };
+        let t0 = au.play(&sound);
+        let run = DrumRun::new(beat, t0);
+        let end_ms = (run.end() - au.now()) * 1000.0;
+        self.drum = Some(run);
+        self.play_lights(&sound, t0);
+        if let Some(b) = self.doc.get_element_by_id("beads") {
+            b.set_inner_html(&view::drum_beads(beat.goal as usize, 0));
+        }
+        self.set_msg("<span>Drum!</span>", "");
+        self.sync();
+        let ep = self.epoch;
+        after(end_ms, move || {
+            with(|a| a.drum_end(ep));
+        });
+    }
+
+    fn drum_tap(&mut self) {
+        let Some(now) = self.audio.as_ref().map(|a| a.now()) else {
+            return;
+        };
+        let Some(run) = self.drum.as_mut() else {
+            return;
+        };
+        let counted = run.tap(now);
+        let (hits, goal, done) = (run.hits, run.beat.goal, run.done());
+        // For the browser harness only; never rendered.
+        self.body.set_attribute("data-hits", &hits.to_string()).ok();
+        if !counted {
+            return;
+        }
+        if let Some(b) = self.doc.get_element_by_id("beads") {
+            b.set_inner_html(&view::drum_beads(goal as usize, hits as usize));
+        }
+        if done {
+            self.set_msg(&format!("{}<span>Yes!</span>", art::STAR), "yay");
+            self.confetti();
+            let mut s = listen_core::music::Sound::default().with_chime(0.0);
+            s.dur = 1.0;
+            self.play(&s);
+        }
+    }
+
+    fn drum_end(&mut self, ep: u32) {
+        if ep != self.epoch {
+            return;
+        }
+        let done = self.drum.as_ref().map(|r| r.done()).unwrap_or(false);
+        self.drum = None;
+        let text = if done { "Again?" } else { "Listen!" };
+        self.set_msg(&format!("<span>{text}</span>"), "");
+        self.sync();
+    }
+
+    fn drum_stop(&mut self) {
+        if self.drum.take().is_some() {
+            self.epoch += 1;
+            if let Some(a) = self.audio.as_mut() {
+                a.stop_all();
+            }
+            self.clear_class("lit");
+        }
+    }
+
     // ---------- page lifecycle ----------
 
     fn on_visibility(&mut self) {
         if self.doc.hidden() {
             self.reset_input();
+            self.drum_stop();
             if self.round.is_some() {
                 self.feed(Event::Interrupted);
             } else if let Some(a) = self.audio.as_mut() {
@@ -982,6 +1173,11 @@ impl App {
         if self.round.is_some() {
             self.feed(Event::Interrupted);
         }
+        self.drum_stop();
+        self.sheet_view = view::SheetView {
+            more: false,
+            open: self.current_game(),
+        };
         self.render_sheet();
         if let Some(s) = self.doc.get_element_by_id("sheet") {
             s.remove_attribute("hidden").ok();
@@ -992,7 +1188,11 @@ impl App {
 
     fn render_sheet(&self) {
         if let Some(b) = self.doc.get_element_by_id("sheet-body") {
-            b.set_inner_html(&view::sheet(&self.settings, self.current_game()));
+            b.set_inner_html(&view::sheet(
+                &self.settings,
+                self.current_game(),
+                self.sheet_view,
+            ));
         }
     }
 
@@ -1026,22 +1226,57 @@ impl App {
         };
         let act = b.get_attribute("data-act").unwrap_or_default();
         let parts: Vec<&str> = act.split(':').collect();
+        let mut keep_scroll = true;
         match parts.as_slice() {
             ["close"] => return self.close_sheet(),
-            ["lv", i, l] => {
-                if let (Ok(i), Ok(l)) = (i.parse::<usize>(), l.parse::<u8>()) {
-                    if i < self.settings.levels.len() {
-                        self.settings.levels[i] = l;
+            ["more"] => {
+                self.sheet_view.more = !self.sheet_view.more;
+                keep_scroll = false;
+            }
+            ["open", i] => {
+                let i = i.parse::<usize>().ok();
+                self.sheet_view.open = if self.sheet_view.open == i { None } else { i };
+            }
+            ["age", i] => {
+                if let Some(a) = i.parse::<usize>().ok().and_then(|i| Age::ALL.get(i)) {
+                    self.settings.set_age(*a);
+                }
+            }
+            ["set", i] => {
+                if let Some(n) = i.parse::<usize>().ok().and_then(|i| view::SET_LENS.get(i)) {
+                    self.settings.set_len = *n;
+                }
+            }
+            ["t", i, field, v] => {
+                if let (Ok(i), Ok(v)) = (i.parse::<usize>(), v.parse::<usize>()) {
+                    if let Some(t) = self.settings.tunes.get_mut(i) {
+                        tune_set(t, field, v);
+                    }
+                }
+            }
+            ["t", i, "light"] => {
+                if let Some(t) = i
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|i| self.settings.tunes.get_mut(i))
+                {
+                    t.light = !t.light;
+                }
+            }
+            ["t", i, "preset"] => {
+                if let Ok(i) = i.parse::<usize>() {
+                    if let Some(g) = ALL.get(i) {
+                        self.settings.tunes[i] =
+                            preset(self.settings.age, g.slug()).clamped(g.steps().len());
                     }
                 }
             }
             ["tog", key] => {
                 let s = &mut self.settings;
                 match *key {
-                    "speak" => s.speak = !s.speak,
+                    "sing" => s.sing = !s.sing,
                     "cheer" => s.cheer = !s.cheer,
                     "auto_next" => s.auto_next = !s.auto_next,
-                    "assist" => s.assist = !s.assist,
                     _ => {}
                 }
             }
@@ -1066,6 +1301,7 @@ impl App {
             .query_selector(".sheet-scroll")
             .ok()
             .flatten()
+            .filter(|_| keep_scroll)
             .map(|s| s.scroll_top());
         self.render_sheet();
         if let (Some(top), Some(s)) = (
@@ -1093,7 +1329,7 @@ impl App {
                 self.out("o-volume", &format!("{}%", v.round()));
             }
             "s-len" => {
-                self.settings.note_len = v.clamp(0.8, 2.0);
+                self.settings.note_len = v.clamp(NOTE_LEN.0, NOTE_LEN.1);
                 self.out("o-len", &format!("{:.1} s", self.settings.note_len));
             }
             _ => return,
@@ -1108,14 +1344,25 @@ impl App {
     }
 }
 
-fn speak(say: &str) {
-    let Some(w) = web_sys::window() else { return };
-    let Ok(synth) = w.speech_synthesis() else {
-        return;
-    };
-    if let Ok(u) = web_sys::SpeechSynthesisUtterance::new_with_text(say) {
-        u.set_rate(0.85);
-        u.set_pitch(1.15);
-        synth.speak(&u);
+/// Apply one "More" panel chip to a tune; keeps lo ≤ hi.
+fn tune_set(t: &mut listen_core::Tune, field: &str, v: usize) {
+    const COUNTS: [u8; 4] = [0, 1, 2, 3];
+    const WAITS: [u8; 4] = [0, 3, 5, 8];
+    const SHOWS: [u8; 5] = [0, 1, 2, 3, 5];
+    let pick = |a: &[u8]| a.get(v).copied();
+    match field {
+        "lo" => {
+            t.lo = v as u8;
+            t.hi = t.hi.max(t.lo);
+        }
+        "hi" => {
+            t.hi = v as u8;
+            t.lo = t.lo.min(t.hi);
+        }
+        "show" => t.show = pick(&SHOWS).unwrap_or(t.show),
+        "glow_miss" => t.glow_miss = pick(&COUNTS).unwrap_or(t.glow_miss),
+        "glow_wait" => t.glow_wait = pick(&WAITS).unwrap_or(t.glow_wait),
+        "replay" => t.replay = pick(&COUNTS).unwrap_or(t.replay),
+        _ => {}
     }
 }
