@@ -188,6 +188,13 @@ impl Fingers {
     /// A finger landed on `target`: true if it sounds. Fingers beyond the
     /// limit are ignored until one lifts.
     pub fn down(&mut self, pointer: u64, target: u8, x: f32, y: f32) -> bool {
+        self.land(pointer, Some(target), x, y)
+    }
+
+    /// A finger landed, on a bar or off the bars (the frame, a gap, the
+    /// background). Off the bars it is silent but takes a slot of the
+    /// limit, and plays the first bar it slides into. True if tracked.
+    pub fn land(&mut self, pointer: u64, target: Option<u8>, x: f32, y: f32) -> bool {
         // A repeated down for the same finger replaces it, never doubles.
         self.down.retain(|f| f.pointer != pointer);
         if self.down.len() >= self.max {
@@ -195,7 +202,7 @@ impl Fingers {
         }
         self.down.push(Finger {
             pointer,
-            target: Some(target),
+            target,
             x,
             y,
         });
@@ -533,6 +540,62 @@ mod tests {
         );
         assert_eq!(f.up(2), Some(2));
         assert!(f.holds(2), "the other finger still holds it");
+    }
+
+    #[test]
+    fn a_finger_landing_off_the_bars_plays_the_first_bar_it_slides_into() {
+        let b = stack();
+        let mut f = Fingers::new(5);
+        // On the frame, left of the bars, level with bar 1.
+        assert!(f.land(1, None, -40.0, 100.0));
+        assert_eq!(f.count(), 1, "it takes a slot");
+        assert_eq!(
+            f.slide(1, -20.0, 100.0, &b),
+            (None, None),
+            "silent off the bars"
+        );
+        assert_eq!(f.slide(1, 10.0, 100.0, &b), (None, Some(1)), "enters bar 1");
+        // Then a slide like any other: down across bars 2 and 3.
+        let mut played = vec![];
+        let mut y = 100.0;
+        while y < 240.0 {
+            if let (_, Some(t)) = f.slide(1, 10.0, y, &b) {
+                played.push(t);
+            }
+            y += 3.0;
+        }
+        assert_eq!(played, vec![2, 3]);
+        assert_eq!(f.up(1), Some(3));
+        // A gap: silent until a bar, then same edge hysteresis.
+        assert!(f.land(2, None, 150.0, 65.0));
+        assert_eq!(f.slide(2, 150.0, 72.0, &b), (None, Some(1)));
+        assert_eq!(
+            f.slide(2, 150.0, 66.0, &b),
+            (None, None),
+            "within the edge band"
+        );
+        assert_eq!(f.up(2), Some(1));
+        assert_eq!(f.up(2), None);
+    }
+
+    #[test]
+    fn off_bar_fingers_count_toward_the_limit_and_release_cleanly() {
+        let b = stack();
+        let mut f = Fingers::new(2);
+        assert!(f.land(1, None, -40.0, 30.0));
+        assert!(f.down(2, 4, 150.0, 300.0));
+        assert!(!f.down(3, 0, 150.0, 30.0), "two slots used, one silent");
+        assert_eq!(f.up(1), None, "the silent finger lifts, holding nothing");
+        assert!(f.holds(4));
+        assert!(f.down(3, 0, 150.0, 30.0), "its slot is free again");
+        f.land(4, None, -40.0, 30.0);
+        f.reset();
+        assert_eq!(f.count(), 0);
+        assert_eq!(
+            f.slide(4, 150.0, 30.0, &b),
+            (None, None),
+            "reset: forgotten"
+        );
     }
 
     #[test]

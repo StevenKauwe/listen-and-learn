@@ -464,8 +464,21 @@ impl App {
             }
             return;
         }
-        let Some((tel, id)) = data_t(&el) else { return };
         let pid = e.pointer_id() as u32 as u64;
+        let hit = data_t(&el).filter(|(_, id)| *id < T_LISTEN);
+        if self.sliding() && hit.is_none() {
+            // Free play: a finger landing off the bars (frame, gap,
+            // background) is silent but tracked, and plays the bars it
+            // slides into. Hold buttons and the sheet returned above.
+            if self.bars.is_empty() {
+                self.measure_bars();
+            }
+            if self.fingers.land(pid, None, x as f32, y as f32) {
+                self.on_move(e);
+            }
+            return;
+        }
+        let Some((tel, id)) = data_t(&el) else { return };
         if self.free() && id < T_LISTEN {
             // An instrument: every finger (up to the limit) sounds at
             // contact; no gate, no answers.

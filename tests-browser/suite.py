@@ -10,7 +10,7 @@ through one wrong and one right answer with real PointerEvent sequences.
 Also: a 100 px swipe never answers, a tap while the question plays never
 answers, a second finger is ignored in answer games; Free play sounds up to
 five fingers at once, releases each alone and plays a slide across five
-bars as five notes in order; Drum along drums on with no
+bars as five notes in order, also when the slide starts on the frame; Drum along drums on with no
 end and counts an on-beat streak at 4+ only. Exit 0 iff every row passes.
 """
 
@@ -229,6 +229,7 @@ def play_game(slug):
         check(int(attr("guesses") or 0) == before + 1, "play: a bar sounds at contact (one per touch)")
         play_fingers()
         play_slide()
+        play_slide_from_frame()
         return
     if slug == "drum":
         drum_rows()
@@ -338,6 +339,37 @@ def play_slide():
     check(r["down"] == 0, "play: nothing stays pressed after the slide")
     check(r["max"] < 16.7, f"play: pointermove under a frame (median {r['med']:.2f} ms, max {r['max']:.2f} ms, {r['n']} moves)")
     print(f"     slide pointermove: median {r['med']:.2f} ms, max {r['max']:.2f} ms over {r['n']} moves")
+
+
+SLIDE_FROM_FRAME = """(() => {
+  const bars = [...document.querySelectorAll('#stage .row')];
+  const a = bars[0].querySelector('.bar').getBoundingClientRect(), c = bars[2].getBoundingClientRect();
+  const x = a.left + a.width / 2, y0 = a.top - 6, y1 = c.top + c.height / 2;
+  const start = document.elementFromPoint(x, y0);
+  const order = [];
+  const seen = (ms) => { for (const m of ms) { const el = m.target;
+    if (el.classList.contains('down') && !(m.oldValue || '').split(' ').includes('down')) order.push(+el.dataset.t); } };
+  const obs = new MutationObserver(seen);
+  bars.forEach((el) => obs.observe(el, { attributes: true, attributeFilter: ['class'], attributeOldValue: true }));
+  const ev = (kind, y) => new PointerEvent(kind, { bubbles: true, cancelable: true, clientX: x, clientY: y,
+    pointerId: 51, pointerType: 'touch', isPrimary: true, button: 0, buttons: 1 });
+  const g0 = +document.body.dataset.guesses;
+  start.dispatchEvent(ev('pointerdown', y0)); seen(obs.takeRecords());
+  const silent = +document.body.dataset.guesses === g0;
+  for (let y = y0; y <= y1; y += 3) { start.dispatchEvent(ev('pointermove', y)); seen(obs.takeRecords()); }
+  start.dispatchEvent(ev('pointerup', y1)); seen(obs.takeRecords()); obs.disconnect();
+  return { order, silent, notes: +document.body.dataset.guesses - g0, onBar: !!start.closest('[data-t]'),
+    down: document.querySelectorAll('#stage .row.down').length };
+})()"""
+
+
+def play_slide_from_frame():
+    """Free play: a slide that starts off the bars plays the bars it enters."""
+    r = js(SLIDE_FROM_FRAME)
+    check(not r["onBar"] and r["silent"], "play: a finger landing on the frame is silent")
+    check(r["order"] == [0, 1, 2] and r["notes"] == 3,
+          f"play: starting on the frame, a slide across 3 bars plays 3 notes ({r['order']})")
+    check(r["down"] == 0, "play: nothing stays pressed after it")
 
 
 # Drum on the bear's beat: tap the moment the bear's paws drum (the lit

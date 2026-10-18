@@ -51,7 +51,11 @@ own bar; notes ring out and are never cut by another finger. In Free play
 a finger sliding over the bars plays each bar it enters, like a
 glissando: one note per entry, again if it leaves and comes back. A
 finger keeps its bar until it is 8 px past the bar's edge, so jitter on a
-boundary never plays twice. Bar rectangles are measured once per layout
+boundary never plays twice. A slide may start anywhere off the bars
+(the frame, a gap, the background, but not the house or gear buttons or
+the adult sheet): that finger is silent, takes a "notes at once" slot,
+and plays the first bar it enters, then behaves like any other slide.
+Bar rectangles are measured once per layout
 (screen entry, resize, rotation), so a move is a few comparisons. Answer
 games never sound or activate a neighbour on slide-over.
 
