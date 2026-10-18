@@ -167,7 +167,8 @@ pub struct Fingers {
 #[derive(Clone, Copy, Debug)]
 struct Finger {
     pointer: u64,
-    target: u8,
+    /// The bar under the finger now (None: between bars, after a slide).
+    target: Option<u8>,
     x: f32,
     y: f32,
 }
@@ -194,21 +195,44 @@ impl Fingers {
         }
         self.down.push(Finger {
             pointer,
-            target,
+            target: Some(target),
             x,
             y,
         });
         true
     }
 
-    /// A finger moved. Past the swipe distance it lets go of its bar
-    /// (returned, so the bar can rise if no other finger holds it).
+    /// Free play: a finger slid to (`x`, `y`). Entering a bar plays it,
+    /// like a glissando; leaving one and coming back plays it again.
+    /// Returns (the bar it left, the bar it entered). Hysteresis: the
+    /// finger keeps its bar until it is [`SLIDE_EDGE_PX`] past the bar's
+    /// edge, so jitter on a boundary never plays two notes.
+    pub fn slide(&mut self, pointer: u64, x: f32, y: f32, bars: &Bars) -> (Option<u8>, Option<u8>) {
+        let Some(f) = self.down.iter_mut().find(|f| f.pointer == pointer) else {
+            return (None, None);
+        };
+        if let Some(c) = f.target {
+            if bars.near(c, x, y, SLIDE_EDGE_PX) {
+                return (None, None);
+            }
+        }
+        let now = bars.hit(x, y);
+        if now == f.target {
+            return (None, None);
+        }
+        let left = f.target;
+        f.target = now;
+        (left, now)
+    }
+
+    /// Drum along: a finger moved. Past the swipe distance it lets go of
+    /// the drum (returned, so it can rise if no other finger holds it).
     pub fn r#move(&mut self, pointer: u64, x: f32, y: f32) -> Option<u8> {
         let i = self.down.iter().position(|f| f.pointer == pointer)?;
         let f = self.down[i];
         if dist(f.x, f.y, x, y) > SWIPE_CANCEL_PX {
             self.down.remove(i);
-            return Some(f.target);
+            return f.target;
         }
         None
     }
@@ -216,12 +240,12 @@ impl Fingers {
     /// A finger lifted or was cancelled: the bar it held, if any.
     pub fn up(&mut self, pointer: u64) -> Option<u8> {
         let i = self.down.iter().position(|f| f.pointer == pointer)?;
-        Some(self.down.remove(i).target)
+        self.down.remove(i).target
     }
 
     /// Is any finger still holding `target`?
     pub fn holds(&self, target: u8) -> bool {
-        self.down.iter().any(|f| f.target == target)
+        self.down.iter().any(|f| f.target == Some(target))
     }
 
     pub fn count(&self) -> usize {
@@ -231,6 +255,47 @@ impl Fingers {
     /// Page hidden, screen change: every finger let go.
     pub fn reset(&mut self) {
         self.down.clear();
+    }
+}
+
+/// A sliding finger keeps its bar until this far past the bar's edge.
+pub const SLIDE_EDGE_PX: f32 = 8.0;
+
+/// Free play's bar rectangles in CSS pixels, measured once per layout
+/// (screen entry, resize, rotation) so a pointermove is a few compares.
+#[derive(Clone, Debug, Default)]
+pub struct Bars {
+    rects: Vec<(u8, [f32; 4])>,
+}
+
+impl Bars {
+    /// `rects`: (target, [left, top, right, bottom]).
+    pub fn new(rects: Vec<(u8, [f32; 4])>) -> Self {
+        Bars { rects }
+    }
+
+    /// The bar strictly under (`x`, `y`), if any.
+    pub fn hit(&self, x: f32, y: f32) -> Option<u8> {
+        self.rects
+            .iter()
+            .find(|(_, r)| x >= r[0] && x < r[2] && y >= r[1] && y < r[3])
+            .map(|(t, _)| *t)
+    }
+
+    /// Is (`x`, `y`) on bar `t` or within `edge` px of it?
+    pub fn near(&self, t: u8, x: f32, y: f32, edge: f32) -> bool {
+        self.rects.iter().any(|(id, r)| {
+            *id == t && x >= r[0] - edge && x < r[2] + edge && y >= r[1] - edge && y < r[3] + edge
+        })
+    }
+
+    /// Bar `t`'s rectangle.
+    pub fn rect(&self, t: u8) -> Option<[f32; 4]> {
+        self.rects.iter().find(|(id, _)| *id == t).map(|(_, r)| *r)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rects.is_empty()
     }
 }
 
@@ -368,6 +433,106 @@ mod tests {
         assert_eq!(f.count(), 1);
         assert!(f.down(2, 4, 0.0, 0.0));
         assert_eq!(f.up(1), Some(2));
+    }
+
+    /// Five bars stacked like the portrait xylophone: 60 px tall, 10 px gaps.
+    fn stack() -> Bars {
+        Bars::new(
+            (0..5u8)
+                .map(|i| (i, [0.0, i as f32 * 70.0, 300.0, i as f32 * 70.0 + 60.0]))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn sliding_plays_each_bar_entered_once_in_order() {
+        let b = stack();
+        let mut f = Fingers::new(5);
+        assert!(f.down(1, 0, 150.0, 30.0));
+        let mut played = vec![];
+        let mut y = 30.0;
+        while y < 340.0 {
+            if let (_, Some(t)) = f.slide(1, 150.0, y, &b) {
+                played.push(t);
+            }
+            y += 3.0;
+        }
+        assert_eq!(played, vec![1, 2, 3, 4], "bar 0 sounded at contact");
+        assert!(f.holds(4) && !f.holds(0));
+        assert_eq!(f.up(1), Some(4));
+    }
+
+    #[test]
+    fn leaving_a_bar_and_coming_back_plays_it_again() {
+        let b = stack();
+        let mut f = Fingers::new(5);
+        f.down(1, 1, 150.0, 100.0);
+        assert_eq!(f.slide(1, 150.0, 140.0, &b), (Some(1), Some(2)));
+        assert_eq!(f.slide(1, 150.0, 100.0, &b), (Some(2), Some(1)), "re-entry");
+        // Off the side of the xylophone, then back on.
+        assert_eq!(f.slide(1, 330.0, 100.0, &b), (Some(1), None));
+        assert!(!f.holds(1));
+        assert_eq!(f.up(1), None, "lifted off the bars");
+        f.down(2, 1, 150.0, 100.0);
+        f.slide(2, 330.0, 100.0, &b);
+        assert_eq!(f.slide(2, 290.0, 100.0, &b), (None, Some(1)));
+    }
+
+    #[test]
+    fn jitter_on_a_bar_edge_never_machine_guns_notes() {
+        let b = stack();
+        let mut f = Fingers::new(5);
+        f.down(1, 0, 150.0, 55.0);
+        let mut notes = 0;
+        for i in 0..40 {
+            // ±6 px around the bottom edge of bar 0 (y = 60) and the gap.
+            let y = 60.0 + if i % 2 == 0 { -6.0 } else { 6.0 };
+            if f.slide(1, 150.0, y, &b).1.is_some() {
+                notes += 1;
+            }
+        }
+        assert_eq!(notes, 0);
+        assert!(f.holds(0), "still on its bar");
+        // Touching bars with no gap: a 4 px wobble across the seam keeps one.
+        let seam = Bars::new(vec![
+            (0, [0.0, 0.0, 100.0, 50.0]),
+            (1, [0.0, 50.0, 100.0, 100.0]),
+        ]);
+        let mut g = Fingers::new(5);
+        g.down(1, 0, 50.0, 48.0);
+        for i in 0..20 {
+            let y = if i % 2 == 0 { 52.0 } else { 48.0 };
+            assert_eq!(g.slide(1, 50.0, y, &seam), (None, None));
+        }
+        assert_eq!(
+            g.slide(1, 50.0, 60.0, &seam),
+            (Some(0), Some(1)),
+            "a real move still plays"
+        );
+    }
+
+    #[test]
+    fn two_fingers_slide_independently() {
+        let b = stack();
+        let mut f = Fingers::new(2);
+        f.down(1, 0, 50.0, 30.0);
+        f.down(2, 4, 250.0, 310.0);
+        assert!(!f.down(3, 2, 150.0, 170.0), "a third finger past the limit");
+        assert_eq!(
+            f.slide(3, 150.0, 240.0, &b),
+            (None, None),
+            "it never slides in"
+        );
+        assert_eq!(f.slide(1, 50.0, 100.0, &b), (Some(0), Some(1)));
+        assert_eq!(f.slide(2, 250.0, 240.0, &b), (Some(4), Some(3)));
+        assert_eq!(f.slide(2, 250.0, 170.0, &b), (Some(3), Some(2)));
+        assert_eq!(
+            f.slide(1, 50.0, 170.0, &b),
+            (Some(1), Some(2)),
+            "both on one bar"
+        );
+        assert_eq!(f.up(2), Some(2));
+        assert!(f.holds(2), "the other finger still holds it");
     }
 
     #[test]

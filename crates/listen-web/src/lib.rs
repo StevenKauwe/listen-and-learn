@@ -11,7 +11,7 @@ use listen_core::games::drum::{self, DrumRun};
 use listen_core::music::Sound;
 use listen_core::settings::{HOLD_HOME_MS, HOLD_SETTINGS_MS, NOTE_LEN};
 use listen_core::{
-    by_slug, Age, Decision, Effect, Event, Fingers, Phase, Round, Settings, TouchGate, ALL,
+    by_slug, Age, Bars, Decision, Effect, Event, Fingers, Phase, Round, Settings, TouchGate, ALL,
 };
 use std::cell::RefCell;
 use view::{T_FULLSCREEN, T_LISTEN, T_TILE};
@@ -117,6 +117,8 @@ struct App {
     gate: TouchGate,
     /// Free play and Drum along: one entry per finger on an instrument.
     fingers: Fingers,
+    /// Free play's bar rectangles, for slides (measured per layout).
+    bars: Bars,
     pressed: Option<Element>,
     /// An answer sounded at contact: (target, start on the audio clock,
     /// the sound). The answer's own sound, when it comes, continues it.
@@ -184,6 +186,7 @@ pub fn start() -> Result<(), JsValue> {
         audio_failed: false,
         gate: TouchGate::new(),
         fingers: Fingers::new(1),
+        bars: Bars::default(),
         pressed: None,
         contact: None,
         contact_play: None,
@@ -224,6 +227,9 @@ pub fn start() -> Result<(), JsValue> {
     // pointerdown isn't one, its touchend is.
     listen(w, "touchend", true, |_: web_sys::Event| {
         with(|a| a.unlock_audio());
+    });
+    listen(w, "resize", true, |_: web_sys::Event| {
+        with(|a| a.measure_bars());
     });
     listen(w, "keydown", false, |e: KeyboardEvent| {
         with(|a| a.on_key(&e));
@@ -304,6 +310,40 @@ impl App {
     /// Targets sound at contact (Free play, Drum along).
     fn free(&self) -> bool {
         matches!(self.screen, Screen::Game(i) if ALL[i].free() || ALL[i].beat())
+    }
+
+    /// Free play: slides play the bars they cross.
+    fn sliding(&self) -> bool {
+        matches!(self.screen, Screen::Game(i) if ALL[i].free())
+    }
+
+    /// Measure Free play's bars once per layout, so pointermove only
+    /// compares numbers.
+    fn measure_bars(&mut self) {
+        let mut rects = vec![];
+        if self.sliding() {
+            if let Ok(list) = self.root.query_selector_all("#stage .row[data-t]") {
+                for i in 0..list.length() {
+                    let Some(el) = list.item(i).and_then(|n| n.dyn_into::<Element>().ok()) else {
+                        continue;
+                    };
+                    let Some((_, t)) = data_t(&el) else { continue };
+                    // The painted bar, not the row around it.
+                    let bar = el.query_selector(".bar").ok().flatten().unwrap_or(el);
+                    let r = bar.get_bounding_client_rect();
+                    rects.push((
+                        t,
+                        [
+                            r.left() as f32,
+                            r.top() as f32,
+                            r.right() as f32,
+                            r.bottom() as f32,
+                        ],
+                    ));
+                }
+            }
+        }
+        self.bars = Bars::new(rects);
     }
 
     fn drumming(&self) -> bool {
@@ -468,10 +508,26 @@ impl App {
 
     fn on_move(&mut self, e: &PointerEvent) {
         let (x, y) = (e.client_x() as f64, e.client_y() as f64);
-        if let Some(t) = self
-            .fingers
-            .r#move(e.pointer_id() as u32 as u64, x as f32, y as f32)
-        {
+        let pid = e.pointer_id() as u32 as u64;
+        if self.sliding() {
+            // Free play: a finger sliding over the bars plays each bar it
+            // enters (pointer capture keeps its moves coming here).
+            if self.fingers.count() > 0 {
+                if self.bars.is_empty() {
+                    self.measure_bars();
+                }
+                let (left, entered) = self.fingers.slide(pid, x as f32, y as f32, &self.bars);
+                if let Some(t) = left {
+                    self.release_target(t);
+                }
+                if let Some(t) = entered {
+                    if let Some(el) = self.target(t) {
+                        let _ = el.class_list().add_1("down");
+                        self.free_play(t, &el, None);
+                    }
+                }
+            }
+        } else if let Some(t) = self.fingers.r#move(pid, x as f32, y as f32) {
             self.release_target(t);
         }
         if let Some(h) = &self.hold {
@@ -761,6 +817,7 @@ impl App {
         });
         self.warm_later(self.epoch);
         self.root.set_inner_html(&view::game(g, &targets));
+        self.measure_bars();
         self.body.set_attribute("data-route", g.slug()).ok();
         self.wake();
         self.sync();
@@ -1099,17 +1156,26 @@ impl App {
         let Some(fx) = self.doc.get_element_by_id("fx") else {
             return;
         };
-        let r = el.get_bounding_client_rect();
+        // From the measured bar (no forced layout in a move handler).
+        let [l, t, r, b] = self.bars.rect(id).unwrap_or_else(|| {
+            let r = el.get_bounding_client_rect();
+            [
+                r.left() as f32,
+                r.top() as f32,
+                r.right() as f32,
+                r.bottom() as f32,
+            ]
+        });
         if let Ok(s) = self.doc.create_element("i") {
             let key = listen_core::music::SCALE[id as usize].key;
             s.set_class_name("fly");
             s.set_inner_html(art::NOTE);
-            let x = r.left() + r.width() * (0.3 + js_sys::Math::random() * 0.4);
+            let x = l as f64 + (r - l) as f64 * (0.3 + js_sys::Math::random() * 0.4);
             s.set_attribute(
                 "style",
                 &format!(
                     "left:{x:.0}px;top:{:.0}px;color:var(--{key})",
-                    r.top() + r.height() / 2.0
+                    (t + b) as f64 / 2.0
                 ),
             )
             .ok();

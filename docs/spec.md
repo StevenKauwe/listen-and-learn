@@ -47,7 +47,13 @@ Free play and Drum along are instruments, not answers: no gate. Each
 finger sounds at contact, up to the adult "notes at once" limit in Free
 play (default 5) and any number on the drum (fingers landing within 40 ms
 make one drum sound). Lifting or cancelling a finger releases only its
-own bar; notes ring out and are never cut by another finger.
+own bar; notes ring out and are never cut by another finger. In Free play
+a finger sliding over the bars plays each bar it enters, like a
+glissando: one note per entry, again if it leaves and comes back. A
+finger keeps its bar until it is 8 px past the bar's edge, so jitter on a
+boundary never plays twice. Bar rectangles are measured once per layout
+(screen entry, resize, rotation), so a move is a few comparisons. Answer
+games never sound or activate a neighbour on slide-over.
 
 ### 2.1a Responsiveness
 

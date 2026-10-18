@@ -130,5 +130,7 @@ fades the number away; no sound, no wiggle, nothing wrong.
 
 A xylophone with no questions and no wrong answers. Bars sound at contact;
 a note floats up from each. Several fingers play at once, up to "notes at
-once" (default 5; 1 · 2 · 3 · 5 · 10). Rungs: six bars (Do Re Mi Sol La
+once" (default 5; 1 · 2 · 3 · 5 · 10). Sliding a finger across the bars
+plays each bar it enters (a glissando); several fingers can slide at
+once. Rungs: six bars (Do Re Mi Sol La
 Do, pentatonic), eight bars.

@@ -9,7 +9,8 @@ target inside the viewport in portrait and landscape; then plays each game
 through one wrong and one right answer with real PointerEvent sequences.
 Also: a 100 px swipe never answers, a tap while the question plays never
 answers, a second finger is ignored in answer games; Free play sounds up to
-five fingers at once and releases each alone; Drum along drums on with no
+five fingers at once, releases each alone and plays a slide across five
+bars as five notes in order; Drum along drums on with no
 end and counts an on-beat streak at 4+ only. Exit 0 iff every row passes.
 """
 
@@ -227,6 +228,7 @@ def play_game(slug):
         pump(0.2)
         check(int(attr("guesses") or 0) == before + 1, "play: a bar sounds at contact (one per touch)")
         play_fingers()
+        play_slide()
         return
     if slug == "drum":
         drum_rows()
@@ -300,6 +302,42 @@ def play_fingers():
         ptr("pointerup", f'#stage [data-t="{pid - 21}"]', pid=pid)
     pump(0.05)
     check(js(DOWN) == [], "play: all released")
+
+
+SLIDE = """(() => {
+  const bars = [...document.querySelectorAll('#stage .row')];
+  const a = bars[0].getBoundingClientRect(), b = bars[4].getBoundingClientRect();
+  const x0 = a.left + a.width / 2, y0 = a.top + a.height / 2, x1 = b.left + b.width / 2, y1 = b.top + b.height / 2;
+  const order = [], times = [];
+  const seen = (ms) => { for (const m of ms) {
+    const el = m.target; if (el.classList.contains('down') && !(m.oldValue || '').split(' ').includes('down')) order.push(+el.dataset.t); } };
+  const obs = new MutationObserver(seen);
+  const flush = () => seen(obs.takeRecords());
+  bars.forEach((el) => obs.observe(el, { attributes: true, attributeFilter: ['class'], attributeOldValue: true }));
+  const ev = (kind, x, y) => new PointerEvent(kind, { bubbles: true, cancelable: true, clientX: x, clientY: y,
+    pointerId: 41, pointerType: 'touch', isPrimary: true, button: 0, buttons: 1 });
+  bars[0].dispatchEvent(ev('pointerdown', x0, y0)); flush();
+  const steps = Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 3);
+  for (let i = 1; i <= steps; i++) {
+    const x = x0 + (x1 - x0) * i / steps, y = y0 + (y1 - y0) * i / steps;
+    const t = performance.now(); bars[0].dispatchEvent(ev('pointermove', x, y)); times.push(performance.now() - t); flush();
+  }
+  bars[0].dispatchEvent(ev('pointerup', x1, y1));
+  return new Promise((r) => setTimeout(() => { obs.disconnect(); times.sort((p, q) => p - q);
+    r({ order, med: times[times.length >> 1], max: times[times.length - 1], n: times.length,
+        down: document.querySelectorAll('#stage .row.down').length }); }, 50));
+})()"""
+
+
+def play_slide():
+    """Free play: a finger sliding across five bars plays all five, in order."""
+    before = int(attr("guesses") or 0)
+    r = js(SLIDE)
+    check(r["order"] == [0, 1, 2, 3, 4] and int(attr("guesses") or 0) == before + 5,
+          f"play: a slide across 5 bars plays 5 notes in order ({r['order']})")
+    check(r["down"] == 0, "play: nothing stays pressed after the slide")
+    check(r["max"] < 16.7, f"play: pointermove under a frame (median {r['med']:.2f} ms, max {r['max']:.2f} ms, {r['n']} moves)")
+    print(f"     slide pointermove: median {r['med']:.2f} ms, max {r['max']:.2f} ms over {r['n']} moves")
 
 
 # Drum on the bear's beat: tap the moment the bear's paws drum (the lit
