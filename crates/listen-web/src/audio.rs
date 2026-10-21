@@ -15,7 +15,10 @@ pub struct Audio {
     master: GainNode,
     voices: Vec<(GainNode, f64)>,
     primed: bool,
-    unmuted: bool,
+    /// The looping silent `<audio>` (see [`set_session`]).
+    silent: Option<web_sys::HtmlAudioElement>,
+    /// The page is hidden: everything is paused until it shows again.
+    asleep: bool,
     /// Sung syllables rendered by the core singer, keyed by
     /// (syllable, MIDI note, length in ms).
     sung: HashMap<(u8, u32, u32), AudioBuffer>,
@@ -28,35 +31,39 @@ pub struct Audio {
 /// lets a page declare itself "playback" audio (`navigator.audioSession`).
 /// Older iOS: a looping silent `<audio>` element started in a gesture moves
 /// the page into the media category, which also carries Web Audio through.
-/// Returns true once one of the two has been applied.
-fn play_through_silent_switch() -> bool {
+/// Both, not either: some web views (e.g. inside apps or frames) expose
+/// audioSession but don't honour it, while the media element still works.
+///
+/// Both also tell iOS "this page is a music player", which keeps it awake
+/// in the background, so [`Audio::sleep`] undoes them while the page is
+/// hidden and [`Audio::wake`] (or the next touch) puts them back.
+fn set_session(kind: &str) {
     use js_sys::Reflect;
     let Some(win) = web_sys::window() else {
-        return false;
+        return;
     };
     let nav: JsValue = win.navigator().into();
-    // Both, not either: some web views (e.g. inside apps or frames) expose
-    // audioSession but don't honour it, while the media element still works.
     if let Ok(session) = Reflect::get(&nav, &"audioSession".into()) {
         if session.is_object() {
-            let _ = Reflect::set(&session, &"type".into(), &"playback".into());
+            let _ = Reflect::set(&session, &"type".into(), &kind.into());
         }
     }
-    let Ok(el) = web_sys::HtmlAudioElement::new_with_src(&silent_wav_uri()) else {
-        return false;
-    };
+}
+
+fn silent_element() -> Option<web_sys::HtmlAudioElement> {
+    let el = web_sys::HtmlAudioElement::new_with_src(&silent_wav_uri()).ok()?;
     el.set_loop(true);
     let _ = el.set_attribute("playsinline", "");
-    match el.play() {
-        Ok(p) => {
-            let noop = wasm_bindgen::closure::Closure::once(|_: JsValue| {});
-            let _ = p.catch(&noop);
-            noop.forget();
-            // Keep it alive (and playing) for the page's lifetime.
-            std::mem::forget(el);
-            true
-        }
-        Err(_) => false,
+    Some(el)
+}
+
+/// Run a promise to its end, ignoring a refusal (a play or resume outside a
+/// touch is refused; the next touch tries again).
+fn ignore(p: Result<js_sys::Promise, JsValue>) {
+    if let Ok(p) = p {
+        let noop = wasm_bindgen::closure::Closure::once(|_: JsValue| {});
+        let _ = p.catch(&noop);
+        noop.forget();
     }
 }
 
@@ -138,7 +145,8 @@ impl Audio {
             master,
             voices: vec![],
             primed: false,
-            unmuted: false,
+            silent: None,
+            asleep: false,
             sung: HashMap::new(),
             attack: None,
         })
@@ -160,20 +168,17 @@ impl Audio {
     /// Call inside every user gesture (iOS only unlocks from one, and only
     /// from `touchend`/`pointerup`/`click`, not from a touch `pointerdown`).
     pub fn unlock(&mut self) {
+        if self.asleep {
+            return;
+        }
         if !self.running() {
-            if let Ok(p) = self.ctx.resume() {
-                // A refused resume is handled by the retry path, not an error.
-                let noop = wasm_bindgen::closure::Closure::once(|_: JsValue| {});
-                let _ = p.catch(&noop);
-                noop.forget();
-            }
+            // A refused resume is handled by the retry path, not an error.
+            ignore(self.ctx.resume());
             // Re-prime until the context actually runs: a prime from a
             // non-activating event does nothing on iOS.
             self.primed = false;
         }
-        if !self.unmuted {
-            self.unmuted = play_through_silent_switch();
-        }
+        self.play_through_silent_switch();
         if !self.primed {
             if let (Ok(buf), Ok(src)) = (
                 self.ctx.create_buffer(1, 1, 22050.0),
@@ -185,6 +190,48 @@ impl Audio {
                 let _ = src.start();
                 self.primed = true;
             }
+        }
+    }
+
+    /// Declare "playback" audio and (re)start the silent element whenever
+    /// it is paused: a play from a non-activating event is refused, and
+    /// hiding the page pauses it.
+    fn play_through_silent_switch(&mut self) {
+        set_session("playback");
+        if self.silent.is_none() {
+            self.silent = silent_element();
+        }
+        if let Some(el) = &self.silent {
+            if el.paused() {
+                ignore(el.play());
+            }
+        }
+    }
+
+    /// The page was hidden (or frozen): pause the silent element, hand the
+    /// audio session back and suspend the context, so the phone can put
+    /// the page fully to sleep. Nothing sounds while hidden anyway.
+    pub fn sleep(&mut self) {
+        self.asleep = true;
+        if let Some(el) = &self.silent {
+            let _ = el.pause();
+        }
+        set_session("auto");
+        ignore(self.ctx.suspend());
+    }
+
+    /// The page shows again: undo [`Audio::sleep`]. Outside a touch iOS may
+    /// refuse the resume or the play; then the next touch's
+    /// [`Audio::unlock`] does it.
+    pub fn wake(&mut self) {
+        if !self.asleep {
+            return;
+        }
+        self.asleep = false;
+        self.primed = false;
+        ignore(self.ctx.resume());
+        if self.silent.is_some() {
+            self.play_through_silent_switch();
         }
     }
 

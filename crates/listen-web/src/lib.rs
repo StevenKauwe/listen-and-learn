@@ -143,6 +143,8 @@ struct App {
     reset_armed: bool,
     /// Drum along: the current run of beats, if the bear is drumming.
     drum: Option<DrumRun>,
+    /// Hidden or frozen: sound and timers are stopped (see `sleep`).
+    asleep: bool,
     ios: bool,
     standalone: bool,
     errors: u32,
@@ -203,6 +205,7 @@ pub fn start() -> Result<(), JsValue> {
         sheet_view: view::SheetView::default(),
         reset_armed: false,
         drum: None,
+        asleep: false,
         ios,
         standalone,
         errors: 0,
@@ -237,8 +240,23 @@ pub fn start() -> Result<(), JsValue> {
     listen(w, "hashchange", true, |_: web_sys::Event| {
         with(|a| a.route());
     });
-    listen(d, "visibilitychange", true, |_: web_sys::Event| {
+    // A hidden page must do no work: an iPhone keeps a page that looks
+    // like a music player running in the background, draining the battery.
+    // `freeze`/`resume` and `pagehide`/`pageshow` cover the cases where
+    // `visibilitychange` doesn't fire (back-forward cache, frozen tabs).
+    for name in ["visibilitychange", "resume"] {
+        listen(d, name, true, |_: web_sys::Event| {
+            with(|a| a.on_visibility());
+        });
+    }
+    listen(w, "pageshow", true, |_: web_sys::Event| {
         with(|a| a.on_visibility());
+    });
+    listen(w, "pagehide", true, |_: web_sys::Event| {
+        with(|a| a.sleep());
+    });
+    listen(d, "freeze", true, |_: web_sys::Event| {
+        with(|a| a.sleep());
     });
     for name in ["error", "unhandledrejection"] {
         listen(w, name, true, |_: web_sys::Event| {
@@ -1395,16 +1413,52 @@ impl App {
 
     fn on_visibility(&mut self) {
         if self.doc.hidden() {
-            self.reset_input();
-            self.drum_stop();
-            if self.round.is_some() {
-                self.feed(Event::Interrupted);
-            } else if let Some(a) = self.audio.as_mut() {
-                a.stop_all(audio::FADE_LEAVE);
+            self.sleep();
+        } else if self.asleep {
+            self.asleep = false;
+            if let Some(a) = self.audio.as_mut() {
+                a.wake();
             }
-        } else if matches!(self.screen, Screen::Game(_)) {
-            self.wake();
+            if matches!(self.screen, Screen::Game(_)) {
+                self.wake();
+            }
+            self.warm_later(self.epoch);
         }
+        self.sync_audio_attr();
+        // The context's state changes a moment later.
+        let ep = self.epoch;
+        after(300.0, move || {
+            with(|a| {
+                if a.epoch == ep {
+                    a.sync_audio_attr();
+                }
+            });
+        });
+    }
+
+    /// Hidden, frozen or leaving: stop every sound and timer chain (the
+    /// round is interrupted, which bumps the epoch every pending timer
+    /// checks), then put the audio to sleep.
+    fn sleep(&mut self) {
+        if self.asleep {
+            return;
+        }
+        self.asleep = true;
+        self.reset_input();
+        self.drum_stop();
+        if self.round.is_some() {
+            self.feed(Event::Interrupted);
+        } else if let Some(a) = self.audio.as_mut() {
+            a.stop_all(audio::FADE_LEAVE);
+        }
+        // Stop pending timer chains (warming sung syllables, retries).
+        self.epoch += 1;
+        if let Some(a) = self.audio.as_mut() {
+            a.sleep();
+        }
+        // The browser drops the screen wake lock when hidden; forget it so
+        // it is asked for again on return.
+        self.unwake();
         self.sync_audio_attr();
     }
 

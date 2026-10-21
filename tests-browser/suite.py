@@ -487,6 +487,43 @@ def age_two_rows():
     js(f"(localStorage.setItem('{STORE}', '{BY_EAR}'), true)")
 
 
+def background_rows():
+    """A hidden page does no work (iPhones keep a page that plays media
+    awake in the background): the silent media element pauses, the audio
+    context suspends, no timers run; on return sound and play come back."""
+    go("notes")
+    tap("#listen")
+    wait_for("document.body.dataset.phase === 'awaiting'", 5)
+    js("""(() => { const c = window.__bg = { suspend: 0, resume: 0, play: 0, pause: 0, timers: 0 };
+      const A = AudioContext.prototype, M = HTMLMediaElement.prototype;
+      for (const [o, m] of [[A, 'suspend'], [A, 'resume'], [M, 'play'], [M, 'pause']]) {
+        const f = o[m]; o[m] = function (...a) { c[m]++; return f.apply(this, a); }; }
+      const T = window.setTimeout; window.setTimeout = function (f, ...a) {
+        return T.call(window, (...x) => { c.timers++; return f(...x); }, ...a); };
+      window.__hid = false;
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => window.__hid });
+      Object.defineProperty(document, 'visibilityState', { configurable: true,
+        get: () => window.__hid ? 'hidden' : 'visible' });
+      return true; })()""")
+    js("(window.__hid = true, document.dispatchEvent(new Event('visibilitychange')), true)")
+    pump(0.5)
+    js("(window.__bg.timers = 0, true)")
+    pump(2.0)
+    bg = js("window.__bg")
+    check(bg["suspend"] >= 1 and bg["pause"] >= 1 and attr("phase") == "ready",
+          f"hidden page: audio suspended, silent media paused, question stopped ({bg}, phase {attr('phase')})")
+    check(bg["timers"] == 0, f"hidden page: no timers run ({bg['timers']} in 2 s)")
+    js("(window.dispatchEvent(new Event('pagehide')), document.dispatchEvent(new Event('freeze')), true)")
+    check(js("window.__bg.suspend") == bg["suspend"], "pagehide/freeze while asleep change nothing")
+    js("(window.__hid = false, document.dispatchEvent(new Event('visibilitychange')), true)")
+    pump(0.4)
+    bg = js("window.__bg")
+    check(bg["resume"] >= 1 and bg["play"] >= 1, f"page shown again: audio resumes, silent media plays ({bg})")
+    tap("#listen")
+    check(wait_for("document.body.dataset.phase === 'awaiting'", 5), "page shown again: Listen plays the question")
+    check(attr("errors") == "0", "no page errors across hide and show")
+
+
 def main():
     view.load_uri(BASE + "#notes")
     check(wait_for("document.body.dataset.route === 'notes'", 20), "wasm boots, deep link opens a game")
@@ -521,6 +558,7 @@ def main():
     for g in GAMES:
         play_game(g)
     age_two_rows()
+    background_rows()
     # Hold-to-home: a short tap does nothing, a 1.5 s hold goes home.
     go("birdfish")
     shot("game-birdfish")

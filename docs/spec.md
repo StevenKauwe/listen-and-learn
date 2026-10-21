@@ -122,6 +122,13 @@ Every question game runs the same machine (`listen-core::round`).
   ("Tap again"); answers never open after an audio failure.
 - Page hidden or interrupted mid-round: audio stops, the round returns to
   Ready with the same question (or the next one, if it was just answered).
+- Page hidden, frozen or left (`visibilitychange`, `freeze`, `pagehide`):
+  no work at all. The silent media element pauses, the audio session goes
+  back to "auto", the audio context suspends and every timer chain stops
+  (an iPhone keeps a page that looks like a music player awake in the
+  background). Shown again (`visibilitychange`, `resume`, `pageshow`):
+  all of it resumes; if the browser refuses outside a touch, the next touch
+  does it.
 - Single-answer games never give the same answer four times running.
 
 ### 2.3 Audio
@@ -286,6 +293,7 @@ lacks: `wasm-tools validate --features=-relaxed-simd`.
 | Right answer | sound, celebration, next round | core, browser |
 | Audio cannot start | retry shown, answers stay closed | core, browser |
 | Page hidden mid-question | clean return to Ready | core |
+| Page hidden | media paused, context suspended, no timers; sound back on return | browser |
 | Stale timer after an interruption | ignored | core |
 | Portrait 390×844 and landscape 844×390 | every target visible, no scroll | browser |
 | Short tap on house or gear | nothing but a "Hold" hint | browser |
