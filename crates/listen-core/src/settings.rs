@@ -225,6 +225,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn always_show_round_trips_for_all_question_games() {
+        let mut s = Settings::default();
+        for (i, game) in ALL.iter().enumerate() {
+            if !game.free() && !game.beat() {
+                s.tunes[i].show = crate::calib::SHOW_ALWAYS;
+            }
+        }
+        assert_eq!(Settings::decode(&s.encode()), s);
+    }
+
+    #[test]
     fn round_trips() {
         let mut s = Settings {
             volume: 0.5,

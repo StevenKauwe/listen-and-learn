@@ -414,7 +414,9 @@ impl Round {
     fn adapt_after_right(&mut self) -> Vec<Effect> {
         let mut fx = vec![];
         if self.show_left > 0 {
-            self.show_left -= 1;
+            if self.show_left != crate::calib::SHOW_ALWAYS {
+                self.show_left -= 1;
+            }
             return fx;
         }
         if self.misses == 0 {
@@ -549,6 +551,41 @@ mod tests {
         let fx = r.handle(Event::Answer(r.q.answer[0]));
         r.handle(Event::Timer(seq(&fx)));
         r.handle(Event::Interrupted);
+    }
+
+    #[test]
+    fn always_show_survives_many_rounds_in_every_question_game() {
+        for game in crate::ALL
+            .iter()
+            .copied()
+            .filter(|g| !g.free() && !g.beat())
+        {
+            let mut config = cfg(game.slug(), Age::Five);
+            config.tune.show = crate::calib::SHOW_ALWAYS;
+            config.set_len = 0;
+            config.auto_next = false;
+            let mut r = Round::new(game, config, 42);
+            for _ in 0..260 {
+                assert_eq!(r.help(), Help::Show, "{}", game.slug());
+                let fx = r.handle(Event::Listen);
+                assert!(
+                    fx.contains(&Effect::Focus(Some(r.q.answer[0]))),
+                    "{}",
+                    game.slug()
+                );
+                let fx = r.handle(Event::Timer(seq(&fx)));
+                assert!(fx.contains(&Effect::Hint(Some(r.q.answer[0]))));
+                let answer = r.q.answer.clone();
+                for target in answer {
+                    let fx = r.handle(Event::Answer(target));
+                    if r.phase == Phase::Right {
+                        r.handle(Event::Timer(seq(&fx)));
+                    }
+                }
+                assert_eq!(r.phase, Phase::Ready, "{}", game.slug());
+            }
+            assert_eq!(r.show_left, crate::calib::SHOW_ALWAYS);
+        }
     }
 
     #[test]

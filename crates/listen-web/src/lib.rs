@@ -1718,7 +1718,7 @@ impl App {
 fn tune_set(t: &mut listen_core::Tune, field: &str, v: usize) {
     const COUNTS: [u8; 4] = [0, 1, 2, 3];
     const WAITS: [u8; 4] = [0, 3, 5, 8];
-    const SHOWS: [u8; 5] = [0, 1, 2, 3, 5];
+    let shows = &view::SHOWS;
     let pick = |a: &[u8]| a.get(v).copied();
     match field {
         "lo" => {
@@ -1729,10 +1729,44 @@ fn tune_set(t: &mut listen_core::Tune, field: &str, v: usize) {
             t.hi = v as u8;
             t.lo = t.lo.min(t.hi);
         }
-        "show" => t.show = pick(&SHOWS).unwrap_or(t.show),
+        "show" => t.show = pick(shows).unwrap_or(t.show),
         "glow_miss" => t.glow_miss = pick(&COUNTS).unwrap_or(t.glow_miss),
         "glow_wait" => t.glow_wait = pick(&WAITS).unwrap_or(t.glow_wait),
         "replay" => t.replay = pick(&COUNTS).unwrap_or(t.replay),
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tune_tests {
+    use super::*;
+
+    #[test]
+    fn infinity_chip_selects_and_renders_for_each_question_game() {
+        let mut settings = Settings::default();
+        for (i, game) in ALL.iter().enumerate() {
+            if game.free() || game.beat() {
+                continue;
+            }
+            tune_set(&mut settings.tunes[i], "show", 5);
+            assert_eq!(settings.tunes[i].show, listen_core::calib::SHOW_ALWAYS);
+            let html = view::sheet(
+                &settings,
+                None,
+                view::SheetView {
+                    more: true,
+                    open: Some(i),
+                },
+            );
+            assert!(
+                html.contains(&format!(
+                    "data-act=\"t:{i}:show:5\" aria-pressed=\"true\">∞ Always"
+                )),
+                "{}",
+                game.slug()
+            );
+            tune_set(&mut settings.tunes[i], "show", 2);
+            assert_eq!(settings.tunes[i].show, 2);
+        }
     }
 }
