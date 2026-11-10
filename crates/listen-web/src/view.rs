@@ -230,7 +230,7 @@ fn row(label: &str, act: &str, values: &[&str], current: usize) -> String {
 /// Chip values for "after N" settings and the index of the current one.
 const COUNTS: [u8; 4] = [0, 1, 2, 3];
 const WAITS: [u8; 4] = [0, 3, 5, 8];
-const SHOWS: [u8; 5] = [0, 1, 2, 3, 5];
+pub const SHOWS: [u8; 6] = [0, 1, 2, 3, 5, listen_core::calib::SHOW_ALWAYS];
 pub const SET_LENS: [u8; 6] = [0, 6, 8, 10, 12, 15];
 
 fn idx(values: &[u8], v: u8) -> usize {
@@ -260,9 +260,16 @@ fn game_panel(s: &Settings, i: usize) -> String {
     }
     if !g.free() && !g.beat() {
         body.push_str(&row(
-            "Show the answer for the first",
+            "Show the answer for",
             &format!("t:{i}:show"),
-            &["Off", "1 round", "2 rounds", "3 rounds", "5 rounds"],
+            &[
+                "Off",
+                "1 round",
+                "2 rounds",
+                "3 rounds",
+                "5 rounds",
+                "∞ Always",
+            ],
             idx(&SHOWS, t.show),
         ));
         body.push_str(&tog(

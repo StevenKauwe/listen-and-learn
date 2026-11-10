@@ -85,7 +85,8 @@ pub struct Tune {
     /// between them (closer after first-try successes, back after misses).
     pub lo: u8,
     pub hi: u8,
-    /// The first this-many right answers of a visit are shown (Help::Show).
+    /// The first this-many right answers of a visit are shown (Help::Show);
+    /// SHOW_ALWAYS keeps showing answers for the whole visit.
     pub show: u8,
     /// After those, light the answer while the question plays.
     pub light: bool,
@@ -96,6 +97,9 @@ pub struct Tune {
     /// Replay the question after this many misses (0 = never).
     pub replay: u8,
 }
+
+/// Sentinel for showing every answer without counting down.
+pub const SHOW_ALWAYS: u8 = u8::MAX;
 
 /// First-try rights in a row before the game steps one rung harder.
 pub const STEP_UP_AFTER: u32 = 3;
@@ -169,7 +173,9 @@ impl Tune {
         let last = steps.saturating_sub(1) as u8;
         self.lo = self.lo.min(last);
         self.hi = self.hi.clamp(self.lo, last);
-        self.show = self.show.min(9);
+        if self.show != SHOW_ALWAYS {
+            self.show = self.show.min(9);
+        }
         self.glow_miss = self.glow_miss.min(9);
         self.glow_wait = self.glow_wait.min(30);
         self.replay = self.replay.min(9);

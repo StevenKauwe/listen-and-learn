@@ -91,6 +91,8 @@ Every question game runs the same machine (`listen-core::round`).
 | Right | closed | ≥ 1.5 s and the answer sound have finished; next question |
 | Wrong | closed | the answer sound has finished; same question |
 
+- While a game is ready to start or resume, the Listen button glows and pulses;
+  with reduced motion it keeps a steady outline instead.
 - Answers are accepted only in Awaiting. No answer is ever accepted before
   the question has played once in full.
 - Wrong: a gentle wiggle, the same question stays, unlimited tries. The
@@ -106,7 +108,7 @@ Every question game runs the same machine (`listen-core::round`).
   of rights (6 at age 2) the round rests with "All done!" and stars
   until Listen is pressed.
 - Help, per question (`listen-core::calib`):
-  - **Shown** (the tune's first N right answers): the answer lights while
+  - **Shown** (the tune's first N right answers, or always): the answer lights while
     the question plays and glows when answers open; every other choice is
     dimmed and, if touched, only makes its own sound. Nothing is wrong.
   - **Lit**: the answer lights while the question plays.
@@ -211,7 +213,7 @@ More panel: note length (1.2 s, 0.8–2.0 s); next round starts by itself
 (on); rest after this many rights (age preset; never, 6, 8, 10, 12, 15).
 Then one row per game (the current one first and open), marked "changed"
 when it differs from the age preset, with: starts at and can get up to
-(ladder rungs), show the answer for the first 0/1/2/3/5 rounds, then
+(ladder rungs), show the answer for 0/1/2/3/5 rounds or always, then
 light it while it plays, glow after 0–3 misses, glow after 0/3/5/8 s,
 replay after 0–3 misses, and "back to the age setting". Free play shows
 its rung and "notes at once" (1 · 2 · 3 · 5 · 10, default 5); Drum along
