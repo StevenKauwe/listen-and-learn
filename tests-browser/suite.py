@@ -7,8 +7,8 @@ Serves the built site (default: dist/), opens it at iPhone size and checks,
 for the home screen and every game: no page errors, no scrolling, every
 target inside the viewport in portrait and landscape; then plays each game
 through one wrong and one right answer with real PointerEvent sequences.
-Also: a 100 px swipe never answers, a tap while the question plays never
-answers, a second finger is ignored in answer games; Free play sounds up to
+Also: a cross-answer swipe never answers, a tap while the question plays never
+answers, mixed-answer simultaneous fingers never score; Free play sounds up to
 five fingers at once, releases each alone and plays a slide across five
 bars as five notes in order, also when the slide starts on the frame; Drum along drums on with no
 end and counts an on-beat streak at 4+ only. Exit 0 iff every row passes.
@@ -264,16 +264,22 @@ def play_game(slug):
     answer = [int(x) for x in attr("answer").split(",")]
     targets = js("[...document.querySelectorAll('#stage [data-t]')].map(e => +e.dataset.t)")
     wrong = next(t for t in targets if t != answer[0])
-    swipe(f'#stage [data-t="{wrong}"]', 100)
-    pump(0.1)
-    check(attr("guesses") == "0", f"{slug}: 100 px swipe is not an answer")
-    # Two fingers: the second is ignored, the first answers once.
+    # Crossing onto another answer cancels; displacement inside one
+    # answer is deliberately no longer treated as a swipe.
+    ptr("pointerdown", f'#stage [data-t="{wrong}"]')
+    ptr("pointermove", f'#stage [data-t="{answer[0]}"]')
+    ptr("pointerup", f'#stage [data-t="{answer[0]}"]')
+    pump(0.3)
+    check(attr("guesses") == "0", f"{slug}: crossing answers is not an answer")
     ptr("pointerdown", f'#stage [data-t="{wrong}"]', pid=1)
     ptr("pointerdown", f'#stage [data-t="{answer[0]}"]', pid=2)
     ptr("pointerup", f'#stage [data-t="{answer[0]}"]', pid=2)
     ptr("pointerup", f'#stage [data-t="{wrong}"]', pid=1)
-    pump(0.1)
-    check(attr("guesses") == "1" and attr("wrong") == "1", f"{slug}: wrong answer counted once, second finger ignored")
+    pump(0.3)
+    check(attr("guesses") == "0", f"{slug}: mixed simultaneous answers do not score")
+    tap(f'#stage [data-t="{wrong}"]')
+    pump(0.3)
+    check(attr("guesses") == "1" and attr("wrong") == "1", f"{slug}: deliberate wrong answer counted once")
     check(attr("phase") == "wrong", f"{slug}: gentle wrong state")
     if slug == "notes":
         shot("game-notes-wrong")
@@ -281,7 +287,7 @@ def play_game(slug):
     check([int(x) for x in attr("answer").split(",")] == answer, f"{slug}: same question stays")
     for a in answer:
         tap(f'#stage [data-t="{a}"]')
-        pump(0.08)
+        pump(0.3)
     check(attr("right") == "1", f"{slug}: right answer celebrated")
     pump(0.3)
     if slug in ("notes", "birdfish", "stairs"):
@@ -462,7 +468,7 @@ def age_two_rows():
     pump(0.2)
     check(attr("wrong") == "0" and attr("phase") == "awaiting", "age 2: the dimmed bar only sounds, nothing is wrong")
     tap(f'#stage [data-t="{ans}"]')
-    pump(0.2)
+    pump(0.3)
     check(attr("right") == "1", "age 2: right answer celebrated")
     for slug in ["birdfish", "who"]:
         go(slug)

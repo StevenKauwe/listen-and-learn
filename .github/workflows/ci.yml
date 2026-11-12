@@ -42,7 +42,8 @@ jobs:
 
   web:
     name: wasm build, relaxed-SIMD check, size
-    runs-on: ubuntu-latest
+    # Pin a Playwright-supported image; ubuntu-latest is migrating to 26.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable branch
@@ -70,6 +71,13 @@ jobs:
       - run: tools/build.sh
       - name: No relaxed SIMD (iPhone WebKit rejects it)
         run: wasm-tools validate --features=-relaxed-simd dist/listen_web_bg.wasm
+      - name: Browser interaction regressions
+        run: |
+          python3 -m venv "$RUNNER_TEMP/listen-browser"
+          "$RUNNER_TEMP/listen-browser/bin/pip" install playwright==1.60.0
+          "$RUNNER_TEMP/listen-browser/bin/python" -m playwright install --with-deps chromium
+          "$RUNNER_TEMP/listen-browser/bin/python" tests-browser/tap_start.py
+          "$RUNNER_TEMP/listen-browser/bin/python" tests-browser/forgiving_answers.py
       - name: Size report
         run: |
           {
