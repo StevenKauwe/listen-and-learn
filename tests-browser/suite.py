@@ -214,7 +214,7 @@ def fits(label):
     check(bad == "" and js("scrollY === 0"), f"{label}: fits, no scroll (outside: {bad or 'none'})")
 
 
-CENTRE = """(() => [...document.querySelectorAll('.knob, .listen')].filter(b => b.getClientRects().length).map((b) => {
+CENTRE = """(() => [...document.querySelectorAll('.knob')].filter(b => b.getClientRects().length).map((b) => {
   const r = b.getBoundingClientRect(); let l = 1e9, t = 1e9, R = -1e9, B = -1e9;
   b.querySelectorAll('svg:not(.ring) path, svg:not(.ring) circle, svg:not(.ring) rect').forEach((s) => {
     const q = s.getBoundingClientRect(); if (!q.width) return;
@@ -254,8 +254,8 @@ def play_game(slug):
     first = '#stage [data-t="0"]'
     tap(first)
     pump(0.1)
-    check(attr("guesses") == "0", f"{slug}: answer before Listen ignored")
-    tap("#listen")
+    check(attr("guesses") == "0", f"{slug}: starting tap does not answer")
+    check(js("document.querySelector('.listen, #listen') === null"), f"{slug}: no separate play button")
     check(wait_for("document.body.dataset.phase === 'question'", 3), f"{slug}: Listen plays the question (audio {attr('audio')})")
     tap(first)
     pump(0.05)
@@ -412,7 +412,7 @@ def drum_rows():
     tap('#stage [data-t="0"]')
     pump(0.2)
     check(int(attr("guesses") or 0) == before + 1, "drum: the drum sounds at contact before the bear starts")
-    tap("#listen")
+    tap("#stage [data-t]")
     check(wait_for("document.body.dataset.phase === 'drumming'", 3), "drum: Listen starts the bear drumming")
     # Two hands: a second finger while the first rests still drums.
     before = int(attr("guesses") or 0)
@@ -451,7 +451,7 @@ def age_two_rows():
     bars = js("[...document.querySelectorAll('#stage [data-t]')].map(e => e.querySelector('b').textContent)")
     check(bars == ["Mi", "Sol"], f"age 2: two bars, sol and mi (got {bars})")
     shot("age2-notes-ready")
-    tap("#listen")
+    tap("#stage [data-t]")
     check(wait_for("document.body.dataset.phase === 'awaiting'", 8), "age 2: question plays")
     ans = attr("answer")
     check(js(f"document.querySelector('#stage [data-t=\"{ans}\"]').classList.contains('glow')"), "age 2: the answer glows")
@@ -473,7 +473,7 @@ def age_two_rows():
             shot("age2-who")
     go("drum")
     pump(0.3)
-    tap("#listen")
+    tap("#stage [data-t]")
     check(wait_for("document.body.dataset.phase === 'drumming'", 3), "age 2: the bear drums")
     pump(0.5)
     hits = int(attr("hits") or 0)
@@ -492,7 +492,7 @@ def background_rows():
     awake in the background): the silent media element pauses, the audio
     context suspends, no timers run; on return sound and play come back."""
     go("notes")
-    tap("#listen")
+    tap("#stage [data-t]")
     wait_for("document.body.dataset.phase === 'awaiting'", 5)
     js("""(() => { const c = window.__bg = { suspend: 0, resume: 0, play: 0, pause: 0, timers: 0 };
       const A = AudioContext.prototype, M = HTMLMediaElement.prototype;
@@ -519,7 +519,7 @@ def background_rows():
     pump(0.4)
     bg = js("window.__bg")
     check(bg["resume"] >= 1 and bg["play"] >= 1, f"page shown again: audio resumes, silent media plays ({bg})")
-    tap("#listen")
+    tap("#stage [data-t]")
     check(wait_for("document.body.dataset.phase === 'awaiting'", 5), "page shown again: Listen plays the question")
     check(attr("errors") == "0", "no page errors across hide and show")
 
@@ -528,7 +528,7 @@ def main():
     view.load_uri(BASE + "#notes")
     check(wait_for("document.body.dataset.route === 'notes'", 20), "wasm boots, deep link opens a game")
     pump(0.5)
-    tap("#listen")
+    tap("#stage [data-t]")
     wait_for("document.body.dataset.retry === '1' || document.body.dataset.audio === 'running'", 5)
     real = attr("audio")
     if real != "running":

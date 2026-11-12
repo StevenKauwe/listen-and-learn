@@ -311,3 +311,7 @@ played; correct pitch and timing; huge targets; a stable round machine.
 P1: warm tone; auto-next; gentle feedback; easy first levels; offline PWA;
 protected settings. P2: more games, instruments, adaptive levels, progress
 views.
+
+## Tap-to-start interaction
+
+There is no separate play button. In a resting question activity, tapping any answer field starts the prompt without submitting an answer. After interruption, audio failure, or a completed set, the same gesture starts/resumes play. While the prompt sounds, answers remain gated. The top status strip holds instructions and a “Hear again” action for replay; Home and Settings remain adult holds. Keyboard Enter/Space on a field has the same semantics. Drum/bear taps start accompaniment; free-play bars still sound immediately. Both orientations reserve the full area below the header for the activity.
