@@ -10,7 +10,7 @@ with sync_playwright() as p:
  b=p.chromium.launch(executable_path=os.environ.get('CHROME'),headless=True,args=['--autoplay-policy=no-user-gesture-required'])
  page=b.new_page(viewport={'width':390,'height':844})
  for slug in ['notes','birdfish','twins','stairs','echo','tempo','loud','who','drum','play']:
-  print('BEGIN',slug,flush=True);page.goto(base+'#'+slug,wait_until='domcontentloaded');page.wait_for_selector('#stage [data-t]')
+  print('BEGIN',slug,flush=True);page.goto(base+'#'+slug,wait_until='domcontentloaded');page.wait_for_function('(s)=>document.body.dataset.route===s',arg=slug);page.wait_for_selector('#stage [data-t]')
   assert page.locator('#listen,.listen-wrap').count()==0
   for w,h in [(390,844),(844,390)]:
    page.set_viewport_size({'width':w,'height':h})
