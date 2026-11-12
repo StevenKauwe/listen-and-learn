@@ -518,7 +518,7 @@ impl App {
             // Answers sound at contact too; the gate still decides on
             // release whether the touch is an answer.
             self.contact = None;
-            if id < T_LISTEN {
+            if id < T_LISTEN && self.round.as_ref().is_some_and(|r| r.accepts_answer()) {
                 if let Some(s) = self.round.as_ref().and_then(|r| r.touch_sound(id)) {
                     let t0 = self.play_touch(&s);
                     self.contact = Some((id, t0, s));
@@ -662,12 +662,12 @@ impl App {
             Screen::Home => id == T_FULLSCREEN || id >= T_TILE,
             Screen::Game(_) if self.drumming() => match id {
                 T_LISTEN => self.drum.is_none(),
-                t => t == drum::DRUM,
+                t => t == drum::DRUM || (t == 1 && self.drum.is_none()),
             },
             Screen::Game(_) if self.free() => id < T_LISTEN,
             Screen::Game(_) => match &self.round {
                 Some(r) if id == T_LISTEN => r.accepts_listen(),
-                Some(r) if id < T_LISTEN => r.accepts_answer(),
+                Some(r) if id < T_LISTEN => r.phase == Phase::Ready || r.accepts_answer(),
                 _ => false,
             },
         }
@@ -698,6 +698,9 @@ impl App {
                         }
                     });
                 });
+            }
+            _ if self.round.as_ref().is_some_and(|r| r.phase == Phase::Ready) => {
+                self.listen_pressed();
             }
             t => {
                 let fx = match self.round.as_mut() {
@@ -854,7 +857,7 @@ impl App {
         self.root.set_inner_html(&view::game(g, &targets));
         self.measure_bars();
         if g.beat() {
-            self.set_msg("<span>Listen!</span>", "");
+            self.set_msg("<span>Tap to play</span>", "");
         }
         self.body.set_attribute("data-route", g.slug()).ok();
         self.wake();
@@ -1096,7 +1099,7 @@ impl App {
         }
         let (text, mood) = match r.phase {
             Phase::Ready if r.retry => ("Tap again", "soft"),
-            Phase::Ready => ("Listen!", ""),
+            Phase::Ready => ("Tap to play", ""),
             Phase::Question => ("Listen…", "hush"),
             Phase::Awaiting if echo => ("Your turn", ""),
             Phase::Awaiting => ("Which one?", ""),
@@ -1167,9 +1170,15 @@ impl App {
             _ => return,
         };
         let g = ALL[i];
+        if g.beat() && id == 1 {
+            return self.listen_pressed();
+        }
         let k = self.settings.round_cfg(i).knobs;
         let sound = g.answer_sound(k, id);
         if g.beat() {
+            if self.drum.is_none() {
+                self.listen_pressed();
+            }
             // Fingers landing together (a palm) make one drum sound.
             let now = self.audio.as_ref().map(|a| a.now()).unwrap_or(0.0);
             if now - self.last_drum >= drum::SOUND_GAP as f64 {
@@ -1394,7 +1403,7 @@ impl App {
         }
         self.drum = None;
         self.show_streak(0);
-        self.set_msg("<span>Listen!</span>", "");
+        self.set_msg("<span>Tap to play</span>", "");
         self.sync();
     }
 

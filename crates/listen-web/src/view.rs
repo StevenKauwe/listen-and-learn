@@ -86,7 +86,7 @@ pub fn game(g: &dyn Game, targets: &[u8]) -> String {
             format!(r#"<div class="duo who n{}">{picks}</div>"#, targets.len())
         }
         "drum" => format!(
-            r#"<div class="drumming"><div class="streak" id="streak" aria-live="off"></div><div class="bear-wrap" data-t="1" aria-hidden="true">{}</div><button class="pick pad toy" data-t="0" aria-label="Drum">{}</button></div>"#,
+            r#"<div class="drumming"><div class="streak" id="streak" aria-live="off"></div><button class="bear-wrap" data-t="1" aria-label="Start drum along">{}</button><button class="pick pad toy" data-t="0" aria-label="Drum">{}</button></div>"#,
             art::bear_svg(),
             art::drum_svg()
         ),
@@ -100,14 +100,20 @@ pub fn game(g: &dyn Game, targets: &[u8]) -> String {
         }
     };
     let free = if g.free() { " free" } else { "" };
+    let status = if g.free() {
+        r#"<div class="status"><span class="msg" id="msg" aria-live="polite">Play!</span></div>"#
+            .to_string()
+    } else {
+        format!(
+            r#"<button class="status" data-t="{T_LISTEN}" aria-label="Hear the sound again"><span class="msg" id="msg" aria-live="polite"></span><small>Hear again</small></button>"#
+        )
+    };
     format!(
-        r#"<div class="screen game g-{slug}{free}"><header class="top">{home}<div class="msg" id="msg" aria-live="polite"></div>{gear}</header>
-<div class="listen-wrap"><button class="listen" id="listen" data-t="{T_LISTEN}" aria-label="Listen">{spk}</button></div>
+        r#"<div class="screen game g-{slug}{free}"><header class="top">{home}{status}{gear}</header>
 <div class="stage" id="stage">{stage}</div></div>"#,
         slug = g.slug(),
         home = knob_hold("home", "Hold to go home", art::HOUSE),
         gear = knob_hold("gear", "Grown-ups: hold for settings", art::GEAR),
-        spk = art::SPEAKER,
     )
 }
 

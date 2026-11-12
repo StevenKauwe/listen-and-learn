@@ -262,9 +262,6 @@ pub fn drum() -> String {
         .to_string()
 }
 
-/// The question button's speaker.
-pub const SPEAKER: &str = r##"<svg class="spk" viewBox="0 0 100 100" aria-hidden="true"><path class="k" fill="#FFF8EC" d="M18 40 h15 l21 -17 v54 l-21 -17 h-15z"/><path class="k w w1" fill="none" d="M65 38 q8 12 0 24"/><path class="k w w2" fill="none" d="M76 29 q14 21 0 42"/></svg>"##;
-
 pub const HOUSE: &str = r##"<svg class="ico" viewBox="0 0 60 60" aria-hidden="true"><path class="k" fill="#FFF8EC" d="M12 30 L30 14 L48 30 V48 H12Z"/><path class="k" fill="#E5493A" d="M25 48 V37 h10 v11"/></svg>"##;
 
 /// A gear: eight square teeth and a centre hole (the wood shows through),
