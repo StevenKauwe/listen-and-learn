@@ -8,6 +8,7 @@ mod view;
 
 use audio::Audio;
 use listen_core::games::drum::{self, DrumRun};
+use listen_core::gate::{AnswerBurst, ANSWER_QUIET_MS};
 use listen_core::music::Sound;
 use listen_core::settings::{HOLD_HOME_MS, HOLD_SETTINGS_MS, NOTE_LEN};
 use listen_core::{
@@ -115,6 +116,8 @@ struct App {
     audio: Option<Audio>,
     audio_failed: bool,
     gate: TouchGate,
+    answer_burst: AnswerBurst,
+    answer_seq: u32,
     /// Free play and Drum along: one entry per finger on an instrument.
     fingers: Fingers,
     /// Free play's bar rectangles, for slides (measured per layout).
@@ -187,6 +190,8 @@ pub fn start() -> Result<(), JsValue> {
         audio: None,
         audio_failed: false,
         gate: TouchGate::new(),
+        answer_burst: AnswerBurst::default(),
+        answer_seq: 0,
         fingers: Fingers::new(1),
         bars: Bars::default(),
         pressed: None,
@@ -508,9 +513,16 @@ impl App {
             return;
         }
         let open = self.is_open(id);
+        if id < T_LISTEN && self.answering() {
+            self.answer_burst.observe(id, self.now_ms());
+        }
         let d = self
             .gate
             .down(pid, id, x as f32, y as f32, self.now_ms(), open);
+        if d == Decision::Cancelled {
+            self.contact = None;
+            self.release_pressed();
+        }
         if d == Decision::Track {
             let _ = tel.class_list().add_1("down");
             let _ = tel.set_pointer_capture(e.pointer_id());
@@ -568,13 +580,43 @@ impl App {
                 self.hold_cancel(false);
             }
         }
-        if self
-            .gate
-            .r#move(e.pointer_id() as u32 as u64, x as f32, y as f32)
-            == Decision::Cancelled
-        {
+        let hit = if self.answering() {
+            self.field_at(x as f32, y as f32)
+        } else {
+            None
+        };
+        if self.answering() && e.buttons() != 0 {
+            // Continue observing even after this pointer left its field:
+            // a cross-field swipe must not rescue a preceding tap.
+            if let Some(t) = hit {
+                self.answer_burst.observe(t, self.now_ms());
+            }
+        }
+        let decision = if self.answer_gesture() {
+            self.gate.move_on_target(pid, hit)
+        } else {
+            self.gate.r#move(pid, x as f32, y as f32)
+        };
+        if decision == Decision::Cancelled {
+            self.contact = None;
             self.release_pressed();
         }
+    }
+
+    fn field_at(&self, x: f32, y: f32) -> Option<u8> {
+        self.doc
+            .element_from_point(x, y)
+            .and_then(|el| data_t(&el))
+            .map(|(_, id)| id)
+            .filter(|id| *id < T_LISTEN)
+    }
+
+    fn answer_gesture(&self) -> bool {
+        self.answering() && self.gate.target().is_some_and(|id| id < T_LISTEN)
+    }
+
+    fn answering(&self) -> bool {
+        self.round.as_ref().is_some_and(|r| r.accepts_answer())
     }
 
     fn on_up(&mut self, e: &PointerEvent, cancel: bool) {
@@ -593,13 +635,29 @@ impl App {
         let d = if cancel {
             self.gate.cancel(pid)
         } else {
+            if self.answer_gesture() {
+                // Pointer capture keeps event.target at the starting
+                // field: hit-test the real release position instead.
+                let hit = self.field_at(e.client_x() as f32, e.client_y() as f32);
+                if let Some(t) = hit {
+                    self.answer_burst.observe(t, self.now_ms());
+                }
+                if self.gate.move_on_target(pid, hit) == Decision::Cancelled {
+                    self.contact = None;
+                    self.release_pressed();
+                }
+            }
             self.gate.up(pid, self.now_ms())
         };
         match d {
             Decision::Guess(id) => {
                 self.release_pressed();
                 if !(self.free() && id < T_LISTEN) && self.is_open(id) {
-                    self.accept(id);
+                    if id < T_LISTEN && self.answering() {
+                        self.queue_answer(id);
+                    } else {
+                        self.accept(id);
+                    }
                 }
             }
             Decision::Cancelled => {
@@ -619,6 +677,8 @@ impl App {
 
     fn reset_input(&mut self) {
         self.gate.reset();
+        self.answer_burst.reset();
+        self.answer_seq = self.answer_seq.wrapping_add(1);
         self.fingers.reset();
         self.contact = None;
         self.contact_play = None;
@@ -642,6 +702,9 @@ impl App {
             return;
         };
         e.prevent_default();
+        if e.repeat() {
+            return;
+        }
         self.unlock_audio();
         if let Some(h) = el.closest("[data-hold]").ok().flatten() {
             let kind = h.get_attribute("data-hold").unwrap_or_default();
@@ -650,11 +713,35 @@ impl App {
             if self.is_open(id) {
                 if self.free() && id < T_LISTEN {
                     self.free_play(id, &tel, None);
+                } else if id < T_LISTEN && self.answering() {
+                    self.queue_answer(id);
                 } else {
                     self.accept(id);
                 }
             }
         }
+    }
+
+    fn queue_answer(&mut self, id: u8) {
+        self.answer_burst.submit(id, self.now_ms());
+        self.answer_seq = self.answer_seq.wrapping_add(1);
+        self.settle_answer(self.epoch, self.answer_seq, ANSWER_QUIET_MS);
+    }
+
+    fn settle_answer(&self, epoch: u32, seq: u32, delay: u32) {
+        after(delay as f64 + 1.0, move || {
+            with(|a| {
+                if a.epoch != epoch || a.answer_seq != seq || a.sheet_open || !a.answering() {
+                    return;
+                }
+                let left = a.answer_burst.remaining(a.now_ms());
+                if left > 0 {
+                    a.settle_answer(epoch, seq, left);
+                } else if let Some(id) = a.answer_burst.take(a.now_ms()) {
+                    a.accept(id);
+                }
+            });
+        });
     }
 
     fn is_open(&self, id: u8) -> bool {
@@ -904,6 +991,12 @@ impl App {
     }
 
     fn run(&mut self, fx: Vec<Effect>) {
+        if !self.answering() {
+            self.gate.reset();
+            self.release_pressed();
+            self.answer_burst.reset();
+            self.answer_seq = self.answer_seq.wrapping_add(1);
+        }
         for e in fx {
             match e {
                 Effect::Play(s) => match self.contact_play.take() {

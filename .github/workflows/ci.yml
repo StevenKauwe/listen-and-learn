@@ -70,6 +70,13 @@ jobs:
       - run: tools/build.sh
       - name: No relaxed SIMD (iPhone WebKit rejects it)
         run: wasm-tools validate --features=-relaxed-simd dist/listen_web_bg.wasm
+      - name: Browser interaction regressions
+        run: |
+          python3 -m venv "$RUNNER_TEMP/listen-browser"
+          "$RUNNER_TEMP/listen-browser/bin/pip" install playwright==1.60.0
+          "$RUNNER_TEMP/listen-browser/bin/python" -m playwright install --with-deps chromium
+          "$RUNNER_TEMP/listen-browser/bin/python" tests-browser/tap_start.py
+          "$RUNNER_TEMP/listen-browser/bin/python" tests-browser/forgiving_answers.py
       - name: Size report
         run: |
           {

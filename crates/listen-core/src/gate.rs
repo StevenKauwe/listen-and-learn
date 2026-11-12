@@ -4,13 +4,16 @@
 //! What it encodes:
 //! * A tap is judged on the button **touched first**, never the button
 //!   under the finger at release.
-//! * Small-to-moderate drift (default ≤ 35 CSS px) still counts as a tap.
+//! * For non-answer controls, small-to-moderate drift (default ≤ 35 CSS px) still counts as a tap.
 //! * Long presses count. Quick taps count. Release position is free.
 //! * Big movement (default > 70 px) is an intentional swipe: cancelled.
 //! * Between the two: still a tap if it was slow and deliberate (held
 //!   ≥ 300 ms), otherwise a swipe.
-//! * Only ONE pointer may ever be a guess candidate. Extra fingers are
-//!   passively ignored until the interaction ends.
+//! * Only ONE pointer may ever be a guess candidate. Extra fingers on
+//!   the same target are ignored; different targets cancel the candidate.
+//! * Answer fields use move_on_target: sliding inside one field counts,
+//!   but crossing another target never retargets the answer. AnswerBurst
+//!   further rejects rapid mixed-target gestures before they can score.
 //! * A finger already down when guessing opens can never score: only a
 //!   *fresh* `down` in the accepting phase can (the UI checks
 //!   `accepts_guess()` at `down` time and tells the gate).
@@ -36,6 +39,63 @@ pub enum Decision {
     Cancelled,
     /// A deliberate tap completed: exactly one guess for this button.
     Guess(u8),
+}
+
+/// A short quiet window separates a deliberate answer from a burst of
+/// indiscriminate taps. Repeated contacts on ONE answer collapse to one
+/// submission; different answers in the same burst are never scored.
+pub const ANSWER_QUIET_MS: u32 = 180;
+
+#[derive(Default, Debug)]
+pub struct AnswerBurst {
+    target: Option<u8>,
+    last_ms: u32,
+    mixed: bool,
+    submitted: bool,
+}
+
+impl AnswerBurst {
+    pub fn observe(&mut self, target: u8, now: u32) {
+        if self.target.is_none() || now.saturating_sub(self.last_ms) > ANSWER_QUIET_MS {
+            *self = Self {
+                target: Some(target),
+                last_ms: now,
+                mixed: false,
+                submitted: false,
+            };
+        } else {
+            self.mixed |= self.target != Some(target);
+            self.last_ms = now;
+        }
+    }
+
+    pub fn submit(&mut self, target: u8, now: u32) {
+        self.observe(target, now);
+        self.submitted = true;
+    }
+
+    pub fn remaining(&self, now: u32) -> u32 {
+        ANSWER_QUIET_MS.saturating_sub(now.saturating_sub(self.last_ms))
+    }
+
+    /// Call after remaining() is zero. Empty/mixed bursts produce no
+    /// answer, not an incorrect answer or a penalty.
+    pub fn take(&mut self, now: u32) -> Option<u8> {
+        if self.remaining(now) != 0 {
+            return None;
+        }
+        let result = if self.submitted && !self.mixed {
+            self.target
+        } else {
+            None
+        };
+        *self = Self::default();
+        result
+    }
+
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
 }
 
 /// Tracks at most one candidate interaction. Pointer ids are opaque.
@@ -77,6 +137,9 @@ impl TouchGate {
                 // Duplicate down for the same finger (shouldn't happen);
                 // reset it to be safe rather than stuck.
                 self.active = None;
+            } else if guessing_open && a.target != target {
+                self.active = None;
+                return Decision::Cancelled;
             } else {
                 return Decision::Ignore;
             }
@@ -109,6 +172,20 @@ impl TouchGate {
             return Decision::Cancelled;
         }
         Decision::Track
+    }
+
+    /// Answer fields can be large. A slide staying inside the original
+    /// field is still one press, irrespective of pixel distance. Crossing
+    /// another field or leaving the field cancels rather than retargeting.
+    pub fn move_on_target(&mut self, pointer: u64, target: Option<u8>) -> Decision {
+        match self.active {
+            Some(a) if a.pointer == pointer && target == Some(a.target) => Decision::Track,
+            Some(a) if a.pointer == pointer => {
+                self.active = None;
+                Decision::Cancelled
+            }
+            _ => Decision::Ignore,
+        }
     }
 
     /// The tracked pointer lifted: the moment of truth.
@@ -151,6 +228,10 @@ impl TouchGate {
 
     pub fn is_tracking(&self) -> bool {
         self.active.is_some()
+    }
+
+    pub fn target(&self) -> Option<u8> {
+        self.active.map(|a| a.target)
     }
 }
 
@@ -357,10 +438,10 @@ mod tests {
     }
 
     #[test]
-    fn second_finger_is_inert() {
+    fn second_finger_on_same_answer_is_inert() {
         let mut g = TouchGate::new();
         g.down(1, 0, 0.0, 0.0, 0, true);
-        assert_eq!(g.down(2, 1, 50.0, 50.0, 10, true), Decision::Ignore);
+        assert_eq!(g.down(2, 0, 50.0, 50.0, 10, true), Decision::Ignore);
         assert_eq!(g.r#move(2, 300.0, 0.0), Decision::Ignore); // even wild
         assert_eq!(g.up(2, 100), Decision::Ignore);
         assert_eq!(g.up(1, 150), Decision::Guess(0)); // first finger wins
@@ -608,5 +689,64 @@ mod tests {
             assert_eq!(g.up(7, t + 100), Decision::Guess(1));
             assert_eq!(g.up(7, t + 110), Decision::Ignore); // dedup
         }
+    }
+}
+
+#[cfg(test)]
+mod forgiving_answers {
+    use super::*;
+    #[test]
+    fn repeated_same_target_is_one_answer() {
+        let mut b = AnswerBurst::default();
+        b.submit(2, 0);
+        b.observe(2, 60);
+        b.submit(2, 95);
+        assert_eq!(b.take(180), None);
+        assert_eq!(b.take(275), Some(2));
+        assert_eq!(b.take(500), None);
+    }
+    #[test]
+    fn mixed_burst_never_scores_and_recovers_after_quiet() {
+        let mut b = AnswerBurst::default();
+        b.submit(2, 0);
+        b.submit(1, 60);
+        b.submit(2, 100);
+        assert_eq!(b.take(280), None);
+        b.submit(2, 500);
+        assert_eq!(b.take(680), Some(2));
+    }
+    #[test]
+    fn cancelled_second_touch_can_still_invalidate_a_pending_answer() {
+        let mut b = AnswerBurst::default();
+        b.submit(2, 0);
+        b.observe(1, 150);
+        assert_eq!(b.remaining(180), 150);
+        assert_eq!(b.take(330), None);
+    }
+    #[test]
+    fn reset_discards_pending_answers() {
+        let mut b = AnswerBurst::default();
+        b.submit(2, 0);
+        b.reset();
+        assert_eq!(b.take(500), None);
+    }
+    #[test]
+    fn long_slide_within_field_is_one_answer_but_crossing_is_not() {
+        let mut g = TouchGate::new();
+        g.down(1, 2, 0.0, 0.0, 0, true);
+        assert_eq!(g.move_on_target(1, Some(2)), Decision::Track);
+        assert_eq!(g.up(1, 100), Decision::Guess(2));
+        g.down(1, 2, 0.0, 0.0, 200, true);
+        assert_eq!(g.move_on_target(1, Some(3)), Decision::Cancelled);
+        assert_eq!(g.move_on_target(1, Some(2)), Decision::Ignore);
+        assert_eq!(g.up(1, 250), Decision::Ignore);
+    }
+    #[test]
+    fn simultaneous_different_answers_cancel_instead_of_first_finger_winning() {
+        let mut g = TouchGate::new();
+        g.down(1, 2, 0.0, 0.0, 0, true);
+        assert_eq!(g.down(2, 3, 0.0, 0.0, 10, true), Decision::Cancelled);
+        assert_eq!(g.up(1, 100), Decision::Ignore);
+        assert_eq!(g.up(2, 100), Decision::Ignore);
     }
 }

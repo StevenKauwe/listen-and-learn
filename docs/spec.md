@@ -28,12 +28,12 @@ One gate in front of every touch target, home tiles included
 | Rule | Value |
 |---|---|
 | Target judged at | initial contact (never under the finger at release) |
-| Drift that still counts as a tap | ≤ 35 CSS px |
-| Swipe, always cancelled | > 70 px |
-| Between 35 and 70 px | a tap if held ≥ 300 ms, otherwise cancelled |
+| Drift within an answer field | any distance, provided no other field is crossed |
+| Cross-answer swipe | cancelled; never retargeted to the final field |
+| Non-answer controls | legacy ≤35 px drift / slow ≤70 px tolerance |
 | Long press | counts, once, on release |
-| Answers per interaction | exactly one |
-| Extra fingers | ignored until the tracked finger lifts |
+| Answer burst | one answer after 180 ms without further contact; same-field repeats collapse together |
+| Extra fingers | same field: one answer; different fields: cancel the burst with no score/penalty |
 | Finger already down when answers open | cannot answer; must lift and touch again |
 | Touch while answers are closed | ignored, never queued |
 | `pointercancel`, page hidden, screen change | gate resets, nothing stuck |
@@ -42,6 +42,10 @@ Every target sounds and depresses at first contact, before the gate
 decides: an answer's own sound starts at `pointerdown`, and if the touch
 then counts, the answer sound continues from that moment instead of
 starting again. A cancelled touch (swipe) has only made its sound.
+Rapid mixed-target taps score nothing. A fresh deliberate answer after the
+quiet window works normally. Replay, interruption and navigation discard
+pending answers. Echo notes require distinct gestures separated by the
+quiet window, so a double press cannot accidentally complete two steps.
 
 Free play and Drum along are instruments, not answers: no gate. Each
 finger sounds at contact, up to the adult "notes at once" limit in Free
